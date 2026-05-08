@@ -14,6 +14,22 @@ export async function analisarCNPJ(cnpj) {
   return res.json();
 }
 
+export async function analisarComAnexo(cnpj, balanco, cisp) {
+  const form = new FormData();
+  form.append("cnpj", cnpj);
+  if (balanco) form.append("balanco", balanco);
+  if (cisp) form.append("cisp", cisp);
+  const res = await fetch(`${API_BASE}/api/analisar-com-anexo`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Erro HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function processarLote(file) {
   const form = new FormData();
   form.append("file", file);
