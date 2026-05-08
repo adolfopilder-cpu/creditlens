@@ -1,8 +1,10 @@
 // src/pages/AnalisePage.js — P.I.L.D.E.R™ v3.0 — tema bege
+import RelatorioCompleto from "../components/RelatorioCompleto";
 import { useState } from "react";
 import { baixarPDF } from "../hooks/useApi";
 
 const API = process.env.REACT_APP_API_URL || "";
+const [relatorioCompleto, setRelatorioCompleto] = useState(null);
 const ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito";
 
 // Tema bege
@@ -140,11 +142,9 @@ export default function AnalisePage() {
         const err = await res.json().catch(()=>({}));
         throw new Error(err.detail || `Erro HTTP ${res.status}`);
       }
-      setResultado(await res.json());
-    } catch(err) {
-      setErro(err.message);
-    } finally { setLoading(false); }
-  }
+      const data = await res.json();
+setResultado(data);
+setRelatorioCompleto(data.balanco_detalhado ? data : null);
 
   async function handlePDF() {
     setPdfLoading(true);
@@ -455,6 +455,7 @@ export default function AnalisePage() {
           </div>
         </>
       )}
+{relatorioCompleto && <RelatorioCompleto resultado={relatorioCompleto} />}
     </div>
   );
 }
