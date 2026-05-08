@@ -862,7 +862,31 @@ async def processar_lote(file: UploadFile = File(...)):
     except HTTPException: raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
+@app.post("/api/analisar-completo")
+async def analisar_completo(
+    cnpj: str = Form(...),
+    balanco: Optional[UploadFile] = File(None),
+    cisp: Optional[UploadFile] = File(None),
+):
+    """Análise completa com balanço detalhado + parecer IA + 10 sinais RJ."""
+    try:
+        texto_balanco = ""
+        texto_cisp = ""
+        if balanco:
+            conteudo = await balanco.read()
+            texto_balanco = conteudo.decode("utf-8", errors="ignore")
+        if cisp:
+            conteudo = await cisp.read()
+            texto_cisp = conteudo.decode("utf-8", errors="ignore")
+        resultado = analisar_cnpj_completo(cnpj, texto_balanco, texto_cisp)
+        bal = analisar_balanco_detalhado(texto_balanco)
+        cisp_anal = analisar_cisp_detalhado(texto_cisp)
+        relatorio = gerar_relatorio_completo(resultado, bal, cisp_anal)
+        return JSONResponse(content=relatorio)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 @app.get("/api/conectores")
 def status_conectores():
     return {
