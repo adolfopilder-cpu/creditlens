@@ -3,6 +3,11 @@
 P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito
 Backend FastAPI v3.0 — 48 fontes + suporte a anexos (balanço, CISP)
 """
+from analise_detalhada import (
+    analisar_balanco_detalhado,
+    analisar_cisp_detalhado,
+    gerar_relatorio_completo,
+)
 from __future__ import annotations
 import datetime as dt, json, os, re, io, base64, traceback
 from dataclasses import dataclass, field, asdict
