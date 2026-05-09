@@ -17,15 +17,39 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # UTILITÁRIOS DE EXTRAÇÃO
 # =============================================================================
 def extrair_float(texto: str, *padroes) -> Optional[float]:
-    """Tenta extrair valor numérico próximo a qualquer dos padrões."""
+    """Extrai valor numérico próximo a qualquer dos padrões.
+    Suporta: R$ 36.7898 mi, R$ 36.789.800, 36789800, 36,78
+    """
     for padrao in padroes:
+        # 1. Tenta formato em MILHÕES: R$ X.XXXX mi ou X,X mi
+        matches_mi = re.findall(
+            rf"{padrao}[^\d\n]{{0,80}}R?\$?\s*([\d][\d\.\,]{{0,10}})\s*mi\b",
+            texto, re.IGNORECASE
+        )
+        for m in matches_mi:
+            try:
+                v = str(m).strip().replace(",", ".")
+                return float(v) * 1_000_000
+            except:
+                continue
+
+        # 2. Tenta formato normal (com ou sem R$)
         matches = re.findall(
-            rf"{padrao}[^\d\n]{{0,60}}([\d\.,]+)",
+            rf"{padrao}[^\d\n]{{0,60}}R?\$?\s*([\d][\d\.\,]{{1,15}})",
             texto, re.IGNORECASE
         )
         for m in matches:
             try:
-                v = str(m).replace(".", "").replace(",", ".")
+                v = str(m).strip()
+                # Detecta se é decimal brasileiro (1.234,56) ou americano (1,234.56)
+                if re.search(r"\d\.\d{{3}}", v) and "," in v:
+                    # Formato BR: 1.234,56
+                    v = v.replace(".", "").replace(",", ".")
+                elif re.search(r"\d,\d{{3}}", v) and "." in v:
+                    # Formato US: 1,234.56
+                    v = v.replace(",", "")
+                else:
+                    v = v.replace(".", "").replace(",", ".")
                 val = float(v)
                 if val > 0:
                     return val
