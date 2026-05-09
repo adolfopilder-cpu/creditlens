@@ -9,8 +9,9 @@ import base64, datetime as dt, io, json, os, re, traceback
 from typing import Optional
 import requests
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import pandas as pd
 from reportlab.lib import colors
@@ -911,6 +912,59 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
 # GERAÇÃO DE PDF
 # ══════════════════════════════════════════════════════════════════
 
+# Constantes de cor para PDF
+ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
+W = A4[0] - 3*cm  # largura útil para tabelas PDF
+NAVY_C  = colors.HexColor("#1E3A5F")
+GOLD_C  = colors.HexColor("#b49303")
+RED_C   = colors.HexColor("#c0392b")
+YEL_C   = colors.HexColor("#b45309")
+GRN_C   = colors.HexColor("#0e7a5a")
+LIGHT_C = colors.HexColor("#f5f0e8")
+BGRED_C = colors.HexColor("#fff0ee")
+BGYL_C  = colors.HexColor("#fff8ee")
+BGGRN_C = colors.HexColor("#edfaf5")
+BORD_C  = colors.HexColor("#d4c9a8")
+MUTED_C = colors.HexColor("#6b6b7b")
+BLACK_C = colors.HexColor("#1a1a2e")
+
+# Aliases para uso na função gerar_pdf_executivo
+NAVY = NAVY_C; GOLD = GOLD_C; RED = RED_C; YEL = YEL_C; GRN = GRN_C
+LIGHT = LIGHT_C; BGRED = BGRED_C; BGYL = BGYL_C; BGGRN = BGGRN_C
+BORD = BORD_C; WHITE = colors.white; BLACK = BLACK_C; MUTED = MUTED_C
+
+def ps(name, **kw):
+    """Cria ParagraphStyle para PDF."""
+    from reportlab.lib.styles import ParagraphStyle
+    base = dict(fontName="Helvetica", fontSize=8, textColor=BLACK_C, leading=12)
+    base.update(kw)
+    return ParagraphStyle(name + str(id(kw)), **base)
+
+def secao(titulo):
+    """Retorna elementos de seção para PDF."""
+    return [
+        Spacer(1, 8),
+        Paragraph(titulo, ps("sec", fontName="Helvetica-Bold", fontSize=9,
+                              textColor=GOLD, leading=14)),
+        HRFlowable(width="100%", thickness=1, color=GOLD, spaceAfter=4),
+    ]
+
+def fmt_r(v):
+    if v is None: return "—"
+    try: return f"R$ {float(v):,.0f}"
+    except: return str(v)
+
+def fmt_pct(v):
+    if v is None: return "—"
+    try: return f"{float(v):.1f}%"
+    except: return str(v)
+
+def fmt_mult(v):
+    if v is None: return "—"
+    try: return f"{float(v):.2f}×"
+    except: return str(v)
+
+
 def gerar_pdf_executivo(resultado: dict) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
@@ -1462,6 +1516,7 @@ async def processar_lote(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(500, detail=str(e))
+
 @app.post("/api/pdf-download")
 async def pdf_download(
     cnpj: str = Form(...),
@@ -1500,6 +1555,8 @@ async def pdf_download(
         )
     except Exception as e:
         raise HTTPException(500, detail=str(e))
+
+
 @app.get("/api/conectores")
 def conectores():
     return {
