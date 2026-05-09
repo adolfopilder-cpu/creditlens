@@ -1,14 +1,10 @@
-// src/pages/AnalisePage.js — P.I.L.D.E.R™ v3.0 — tema bege
-import RelatorioFinanceiro from "../components/RelatorioFinanceiro";
-import RelatorioCompleto from "../components/RelatorioCompleto";
+// src/pages/AnalisePage.js — P.I.L.D.E.R™ v4.0 DEFINITIVO
 import { useState } from "react";
-import { baixarPDF } from "../hooks/useApi";
+import RelatorioFinanceiro from "../components/RelatorioFinanceiro";
 
 const API = process.env.REACT_APP_API_URL || "";
-const [relatorioCompleto, setRelatorioCompleto] = useState(null);
 const ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito";
 
-// Tema bege
 const BG = "#f5f0e8";
 const CARD = "#ffffff";
 const BORDER = "#d4c9a8";
@@ -18,20 +14,20 @@ const MUTED = "#6b6b7b";
 const TEXT = "#1a1a2e";
 
 const STATUS_COLOR = {
-  confirmacao: "#0e7a5a", ausencia: "#0e7a5a", indicio: "#b45309",
-  pendente: "#6b6b7b", nao_consultado: "#9ca3af", erro: "#c0392b",
+  confirmacao:"#0e7a5a", evidencia:"#16a34a", ausencia:"#0e7a5a",
+  indicio:"#b45309", pendente:"#6b6b7b", nao_consultado:"#9ca3af", erro:"#c0392b",
 };
 const STATUS_LABEL = {
-  confirmacao: "✓ Confirmado", ausencia: "○ Sem ocorrência", indicio: "⚡ Indício",
-  pendente: "⏳ Pendente", nao_consultado: "— Não consultado", erro: "✗ Erro",
+  confirmacao:"✓ Confirmado", evidencia:"✓ Evidência", ausencia:"○ Sem ocorrência",
+  indicio:"⚡ Indício", pendente:"⏳ Pendente", nao_consultado:"— Não consultado", erro:"✗ Erro",
 };
 const RATING_COLOR = {
   AAA:"#0e7a5a",AA:"#16a34a",A:"#15803d",BBB:"#b45309",BB:"#d97706",B:"#ea580c",C:"#c0392b",D:"#7f1d1d"
 };
 const RISCO_COLOR = { baixo:"#0e7a5a", medio:"#b45309", alto:"#c0392b" };
 
-function fmt(cnpj) {
-  const d = cnpj.replace(/\D/g,"").slice(0,14);
+function fmtCNPJ(cnpj) {
+  const d = (cnpj||"").replace(/\D/g,"").slice(0,14);
   return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5");
 }
 
@@ -71,11 +67,15 @@ function FonteRow({ fonte, idx }) {
       <div onClick={()=>setOpen(o=>!o)} style={{
         display:"flex", alignItems:"center", gap:10,
         padding:"10px 16px", cursor:"pointer",
-        background: open ? BG : CARD,
-        transition:"background 0.15s" }}>
-        <span style={{ fontSize:11, color:MUTED, fontFamily:"monospace",
-          minWidth:24 }}>{idx+1}</span>
-        <span style={{ flex:1, fontSize:12, fontWeight:600, color:TEXT }}>{fonte.fonte}</span>
+        background: open ? BG : CARD, transition:"background 0.15s" }}>
+        <span style={{ fontSize:11, color:MUTED, fontFamily:"monospace", minWidth:24 }}>{idx+1}</span>
+        <span style={{ flex:1, fontSize:12, fontWeight:600, color:TEXT }}>{fonte.fonte}
+          {fonte.resumo && (
+            <span style={{ fontSize:11, color:MUTED, display:"block", marginTop:1, fontWeight:400 }}>
+              {fonte.resumo?.slice(0,100)}
+            </span>
+          )}
+        </span>
         <span style={{ fontSize:10, background:`${color}18`, color,
           border:`1px solid ${color}33`, borderRadius:20,
           padding:"2px 8px", fontWeight:700, whiteSpace:"nowrap" }}>
@@ -110,6 +110,19 @@ function FonteRow({ fonte, idx }) {
   );
 }
 
+async function baixarPDF(cnpj) {
+  const res = await fetch(`${API}/api/pdf/${cnpj}`);
+  const data = await res.json();
+  const bytes = atob(data.pdf_base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr], { type:"application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = data.filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function AnalisePage() {
   const [cnpj, setCnpj] = useState("");
   const [loading, setLoading] = useState(false);
@@ -125,27 +138,46 @@ export default function AnalisePage() {
     e.preventDefault();
     if (!cnpj) return;
     setLoading(true); setErro(""); setResultado(null);
+
     try {
-      let res;
-      if (balanco || cisp) {
-        const form = new FormData();
-        form.append("cnpj", cnpj);
-        if (balanco) form.append("balanco", balanco);
-        if (cisp) form.append("cisp", cisp);
-        res = await fetch(`${API}/api/analisar-com-anexo`, { method:"POST", body:form });
-      } else {
-        res = await fetch(`${API}/api/analisar`, {
-          method:"POST", headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({cnpj})
+      // SEMPRE usa analisar-com-anexo para processar PDFs quando existirem
+      // e analisar-completo para análise detalhada
+      const form = new FormData();
+      form.append("cnpj", cnpj);
+      if (balanco) form.append("balanco", balanco);
+      if (cisp) form.append("cisp", cisp);
+
+      // Tenta endpoint completo primeiro
+      let res = await fetch(`${API}/api/analisar-completo`, {
+        method: "POST",
+        body: form,
+      });
+
+      // Fallback para analisar-com-anexo
+      if (!res.ok) {
+        const form2 = new FormData();
+        form2.append("cnpj", cnpj);
+        if (balanco) form2.append("balanco", balanco);
+        if (cisp) form2.append("cisp", cisp);
+        res = await fetch(`${API}/api/analisar-com-anexo`, {
+          method: "POST",
+          body: form2,
         });
       }
+
       if (!res.ok) {
         const err = await res.json().catch(()=>({}));
         throw new Error(err.detail || `Erro HTTP ${res.status}`);
       }
+
       const data = await res.json();
-setResultado(data);
-setRelatorioCompleto(data.balanco_detalhado ? data : null);
+      setResultado(data);
+    } catch(err) {
+      setErro(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handlePDF() {
     setPdfLoading(true);
@@ -163,7 +195,7 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
 
   return (
     <div>
-      {/* Formulário de análise */}
+      {/* ── FORMULÁRIO ── */}
       <div style={{ background:CARD, border:`1px solid ${BORDER}`,
         borderRadius:14, padding:24, marginBottom:20,
         boxShadow:"0 2px 12px #00000011" }}>
@@ -175,29 +207,30 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
 
         <form onSubmit={handleAnalise} style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
-            <input value={fmt(cnpj)} onChange={e=>setCnpj(e.target.value.replace(/\D/g,""))}
+            <input
+              value={fmtCNPJ(cnpj)}
+              onChange={e=>setCnpj(e.target.value.replace(/\D/g,""))}
               placeholder="Digite o CNPJ: 00.000.000/0000-00"
               maxLength={18}
               style={{ flex:1, minWidth:240, background:BG, border:`2px solid ${BORDER}`,
                 borderRadius:8, padding:"12px 16px", color:TEXT, fontSize:16,
-                fontFamily:"monospace", letterSpacing:1, outline:"none",
-                transition:"border 0.2s" }}
-              onFocus={e=>e.target.style.border=`2px solid ${GOLD}`}
-              onBlur={e=>e.target.style.border=`2px solid ${BORDER}`}
+                fontFamily:"monospace", letterSpacing:1, outline:"none" }}
+              onFocus={e=>e.target.style.borderColor=GOLD}
+              onBlur={e=>e.target.style.borderColor=BORDER}
             />
             <button type="submit" disabled={loading||cnpj.length<14} style={{
               background: cnpj.length<14 ? BORDER : NAVY,
               border:"none", borderRadius:8, padding:"12px 32px",
               color: cnpj.length<14 ? MUTED : "#fff",
-              fontWeight:700, fontSize:14, cursor:cnpj.length<14?"not-allowed":"pointer",
-              whiteSpace:"nowrap", transition:"background 0.2s" }}>
+              fontWeight:700, fontSize:14,
+              cursor:cnpj.length<14?"not-allowed":"pointer" }}>
               {loading ? "⏳ Analisando..." : "🔍 Analisar"}
             </button>
             {r && (
               <button type="button" onClick={handlePDF} disabled={pdfLoading} style={{
                 background:BG, border:`1px solid ${BORDER}`, borderRadius:8,
-                padding:"12px 20px", color:NAVY, fontSize:13, cursor:"pointer",
-                fontWeight:600 }}>
+                padding:"12px 20px", color:NAVY, fontSize:13,
+                cursor:"pointer", fontWeight:600 }}>
                 {pdfLoading?"Gerando...":"⬇ PDF"}
               </button>
             )}
@@ -208,47 +241,58 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
             <div style={{ flex:1, minWidth:200 }}>
               <div style={{ fontSize:11, color:MUTED, fontWeight:600,
                 textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
-                📎 Balanço / DRE (opcional)
+                📊 Balanço / DRE (opcional)
               </div>
               <label style={{ display:"block", background:BG,
                 border:`2px dashed ${balanco?GOLD:BORDER}`,
                 borderRadius:8, padding:"10px 14px", cursor:"pointer",
-                fontSize:13, color:balanco?GOLD:MUTED, transition:"border 0.2s" }}>
+                fontSize:13, color:balanco?GOLD:MUTED }}>
                 <input type="file" accept=".pdf,.txt,.csv,.xlsx,.xls"
                   onChange={e=>setBalanco(e.target.files?.[0]||null)}
                   style={{ display:"none" }} />
-                {balanco ? `✓ ${balanco.name}` : "Clique para anexar balanço ou DRE"}
+                {balanco ? `✓ ${balanco.name}` : "Clique para anexar Balanço ou DRE"}
               </label>
             </div>
             <div style={{ flex:1, minWidth:200 }}>
               <div style={{ fontSize:11, color:MUTED, fontWeight:600,
                 textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
-                📋 Ficha CISP / Cadastro (opcional)
+                📋 Ficha CISP / Credinfar (opcional)
               </div>
               <label style={{ display:"block", background:BG,
                 border:`2px dashed ${cisp?GOLD:BORDER}`,
                 borderRadius:8, padding:"10px 14px", cursor:"pointer",
-                fontSize:13, color:cisp?GOLD:MUTED, transition:"border 0.2s" }}>
+                fontSize:13, color:cisp?GOLD:MUTED }}>
                 <input type="file" accept=".pdf,.txt,.csv,.xlsx,.xls"
                   onChange={e=>setCisp(e.target.files?.[0]||null)}
                   style={{ display:"none" }} />
-                {cisp ? `✓ ${cisp.name}` : "Clique para anexar ficha CISP"}
+                {cisp ? `✓ ${cisp.name}` : "Clique para anexar Ficha CISP / Credinfar"}
               </label>
             </div>
           </div>
+
+          {/* Indicador de arquivos carregados */}
+          {(balanco || cisp) && (
+            <div style={{ background:"#edfaf5", border:"1px solid #a7f3d0",
+              borderRadius:8, padding:"8px 14px", fontSize:12, color:"#0e7a5a" }}>
+              ✓ {[balanco&&`Balanço: ${balanco.name}`, cisp&&`CISP: ${cisp.name}`].filter(Boolean).join(" | ")}
+              {" "}— serão analisados e incluídos no relatório
+            </div>
+          )}
         </form>
 
         {erro && (
           <div style={{ marginTop:12, padding:12, background:"#fff0ee",
-            border:"1px solid #f5c6c6", borderRadius:8,
-            color:"#c0392b", fontSize:13 }}>{erro}</div>
+            border:"1px solid #f5c6c6", borderRadius:8, color:"#c0392b", fontSize:13 }}>
+            {erro}
+          </div>
         )}
       </div>
 
+      {/* Loading */}
       {loading && (
         <div style={{ textAlign:"center", padding:"40px 0", color:MUTED }}>
           <div style={{ fontSize:14, marginBottom:12, fontWeight:600 }}>
-            Consultando 48 fontes...
+            Consultando fontes e analisando documentos...
           </div>
           <div style={{ width:40, height:40, border:`3px solid ${BORDER}`,
             borderTop:`3px solid ${NAVY}`, borderRadius:"50%",
@@ -259,7 +303,7 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
 
       {r && (
         <>
-          {/* Header empresa */}
+          {/* ── HEADER EMPRESA ── */}
           <div style={{ background:CARD, border:`1px solid ${BORDER}`,
             borderRadius:14, padding:24, marginBottom:14,
             boxShadow:"0 2px 12px #00000011" }}>
@@ -272,19 +316,20 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
                   {r.empresa||"—"}
                 </div>
                 <div style={{ fontSize:12, color:MUTED, fontFamily:"monospace", marginBottom:3 }}>
-                  {fmt(r.cnpj)}
+                  {fmtCNPJ(r.cnpj||"")}
                 </div>
                 <div style={{ fontSize:11, color:MUTED, marginTop:4 }}>
                   {r.fontes_consultadas} de {r.total_fontes} fontes consultadas
-                  · {r.fontes_pendentes} pendentes
+                  {r.fontes_pendentes ? ` · ${r.fontes_pendentes} pendentes` : ""}
+                  {r.balanco_detalhado?.disponivel ? " · 📊 Balanço analisado" : ""}
+                  {r.cisp_detalhado?.disponivel ? " · 📋 CISP analisada" : ""}
                 </div>
               </div>
-              <div style={{ display:"flex", flexDirection:"column",
-                alignItems:"center", gap:10 }}>
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
                 <ScoreGauge score={r.score} />
                 <div style={{ display:"flex", gap:8, flexWrap:"wrap", justifyContent:"center" }}>
                   <Badge label={r.rating} color={RATING_COLOR[r.rating]||MUTED} />
-                  <Badge label={r.classificacao_risco?.toUpperCase()}
+                  <Badge label={(r.classificacao_risco||"").toUpperCase()}
                     color={RISCO_COLOR[r.classificacao_risco]||MUTED} />
                   <Badge label={`PD ${r.pd}%`}
                     color={r.pd>35?"#c0392b":r.pd>25?"#b45309":"#0e7a5a"} />
@@ -293,7 +338,7 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
             </div>
           </div>
 
-          {/* KPIs */}
+          {/* ── KPIs ── */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)",
             gap:10, marginBottom:14 }}>
             {[
@@ -313,7 +358,7 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
             ))}
           </div>
 
-          {/* Recomendação */}
+          {/* ── RECOMENDAÇÃO ── */}
           <div style={{ background:CARD, border:`1px solid ${BORDER}`,
             borderRadius:12, padding:18, marginBottom:14,
             boxShadow:"0 1px 6px #00000008" }}>
@@ -347,32 +392,29 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
             </div>
           </div>
 
-          {/* Flags */}
+          {/* ── FLAGS ── */}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr",
             gap:10, marginBottom:14 }}>
             {[
-              {t:"🔴 Red Flags",items:r.red_flags,c:"#c0392b",bg:"#fff0ee"},
-              {t:"🟡 Yellow Flags",items:r.yellow_flags,c:"#b45309",bg:"#fff8ee"},
-              {t:"🟢 Green Flags",items:r.green_flags,c:"#0e7a5a",bg:"#edfaf5"},
+              {t:`🔴 Red Flags (${r.red_flags?.length||0})`,items:r.red_flags,c:"#c0392b",bg:"#fff0ee"},
+              {t:`🟡 Yellow Flags (${r.yellow_flags?.length||0})`,items:r.yellow_flags,c:"#b45309",bg:"#fff8ee"},
+              {t:`🟢 Green Flags (${r.green_flags?.length||0})`,items:r.green_flags,c:"#0e7a5a",bg:"#edfaf5"},
             ].map(({t,items,c,bg})=>(
               <div key={t} style={{ background:bg, border:`1px solid ${c}33`,
                 borderRadius:10, padding:14 }}>
-                <div style={{ fontSize:11, fontWeight:700, color:c,
-                  marginBottom:8 }}>{t} ({items?.length||0})</div>
+                <div style={{ fontSize:11, fontWeight:700, color:c, marginBottom:8 }}>{t}</div>
                 {!items?.length
                   ? <div style={{ fontSize:11, color:MUTED }}>Nenhum</div>
                   : items.map((f,i)=>(
-                    <div key={i} style={{ fontSize:11, color:c==="#c0392b"?"#7f1d1d":
-                      c==="#b45309"?"#7c2d12":"#064e3b",
-                      marginBottom:4, paddingLeft:8,
-                      borderLeft:`2px solid ${c}66` }}>{f}</div>
+                    <div key={i} style={{ fontSize:11, color:TEXT, marginBottom:4,
+                      paddingLeft:8, borderLeft:`2px solid ${c}66`, lineHeight:1.5 }}>{f}</div>
                   ))
                 }
               </div>
             ))}
           </div>
 
-          {/* Sinais RJ */}
+          {/* ── SINAIS RJ ── */}
           {r.sinais_rj?.length > 0 && (
             <div style={{ background:"#fff0ee", border:"1px solid #f5c6c6",
               borderRadius:12, padding:16, marginBottom:14 }}>
@@ -385,7 +427,12 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
             </div>
           )}
 
-          {/* 48 Fontes */}
+          {/* ══════════════════════════════════════════════════════════
+              ANÁLISE DETALHADA — BALANÇO + CISP (RelatorioFinanceiro)
+              ══════════════════════════════════════════════════════════ */}
+          <RelatorioFinanceiro resultado={r} />
+
+          {/* ── 48 FONTES ── */}
           <div style={{ background:CARD, border:`1px solid ${BORDER}`,
             borderRadius:14, overflow:"hidden", marginBottom:14,
             boxShadow:"0 2px 12px #00000011" }}>
@@ -394,7 +441,7 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
               flexWrap:"wrap", gap:10, background:NAVY }}>
               <div>
                 <div style={{ fontSize:14, fontWeight:700, color:"#fff" }}>
-                  Relatório por Fonte — 48 Fontes P.I.L.D.E.R™
+                  Relatório por Fonte — P.I.L.D.E.R™
                 </div>
                 <div style={{ fontSize:11, color:"#94a3b8", marginTop:2 }}>
                   Clique em cada fonte para ver o detalhe completo
@@ -423,11 +470,11 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
               </div>
             </div>
             {fontesFiltradas.map((f,i)=>(
-              <FonteRow key={f.fonte} fonte={f} idx={r.fontes?.indexOf(f)||i} />
+              <FonteRow key={f.fonte+i} fonte={f} idx={r.fontes?.indexOf(f)||i} />
             ))}
           </div>
 
-          {/* Memória de cálculo */}
+          {/* ── MEMÓRIA DE CÁLCULO ── */}
           <details style={{ background:CARD, border:`1px solid ${BORDER}`,
             borderRadius:12, padding:16, marginBottom:16 }}>
             <summary style={{ cursor:"pointer", fontSize:12, color:MUTED,
@@ -439,9 +486,9 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
                 <div key={k} style={{ background:BG, border:`1px solid ${BORDER}`,
                   borderRadius:8, padding:"8px 14px" }}>
                   <div style={{ fontSize:10, color:MUTED, marginBottom:2,
-                    textTransform:"capitalize" }}>{k}</div>
+                    textTransform:"capitalize" }}>{k.replace(/_/g," ")}</div>
                   <div style={{ fontSize:16, fontWeight:700, fontFamily:"monospace",
-                    color:typeof v==="number"&&v>0?"#0e7a5a":v<0?"#c0392b":MUTED }}>
+                    color:typeof v==="number"&&v>0?"#0e7a5a":typeof v==="number"&&v<0?"#c0392b":MUTED }}>
                     {typeof v==="number"?(v>0?`+${v}`:v):v}
                   </div>
                 </div>
@@ -449,15 +496,13 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
             </div>
           </details>
 
-          {/* Assinatura final */}
+          {/* ── ASSINATURA ── */}
           <div style={{ textAlign:"center", padding:"12px 0",
             fontSize:11, color:MUTED, fontWeight:600, letterSpacing:1 }}>
             {ASSINATURA}
           </div>
         </>
       )}
-{relatorioCompleto && <RelatorioCompleto resultado={relatorioCompleto} />}
-  {r && <RelatorioFinanceiro resultado={r} />} 
-  </div>
+    </div>
   );
 }
