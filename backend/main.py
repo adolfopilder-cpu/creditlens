@@ -414,11 +414,18 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
     # Parecer
     parecer = _parecer_balanco(red, yellow, green, ind, pts, nome)
 
+    # Detecta ano do balanço
+    anos = re.findall(r"31/12/(\d{4})", texto)
+    if not anos:
+        anos = re.findall(r"(\d{4})", texto[:500])
+    ano_balanco = sorted(set(anos), reverse=True)[0] if anos else "N/D"
+
     return {
         "disponivel": True,
         "arquivo": nome,
+        "ano_balanco": ano_balanco,
         "status": status,
-        "resumo": f"⚠ {len(red)} RED | {len(yellow)} yellow | ✓ {len(green)} green",
+        "resumo": f"⚠ {len(red)} RED | {len(yellow)} yellow | ✓ {len(green)} green | Ano: {ano_balanco}",
         "pontos": pts,
         "red_flags": red,
         "yellow_flags": yellow,
@@ -903,142 +910,451 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
 # ══════════════════════════════════════════════════════════════════
 # GERAÇÃO DE PDF
 # ══════════════════════════════════════════════════════════════════
-def gerar_pdf_bytes(resultado: dict) -> bytes:
+
+def gerar_pdf_executivo(resultado: dict) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
-        leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
-    NAVY = colors.HexColor("#1E3A5F")
-    GOLD = colors.HexColor("#b49303")
-    RED = colors.HexColor("#c0392b")
-    YELLOW_C = colors.HexColor("#b45309")
-    GREEN_C = colors.HexColor("#0e7a5a")
-    LIGHT = colors.HexColor("#f5f0e8")
-    BORDER = colors.HexColor("#d4c9a8")
-
-    def ps(name, **kw):
-        base = dict(fontName="Helvetica", fontSize=8, textColor=colors.HexColor("#1a1a2e"), leading=12)
-        base.update(kw)
-        return ParagraphStyle(name+str(id(kw)), **base)
+        leftMargin=1.5*cm, rightMargin=1.5*cm,
+        topMargin=1.2*cm, bottomMargin=1.2*cm)
 
     els = []
-    els.append(Paragraph(ASSINATURA, ps("sig", fontName="Helvetica-Bold", fontSize=7,
-                                         textColor=NAVY, alignment=1)))
+    ind = resultado.get("balanco_detalhado", {}).get("indicadores", {})
+    cisp_ind = resultado.get("cisp_detalhado", {}).get("indicadores", {})
+    empresa = resultado.get("empresa", "")
+    cnpj = resultado.get("cnpj", "")
+    bal = resultado.get("balanco_detalhado", {})
+    cisp = resultado.get("cisp_detalhado", {})
+
+    # ═══ CABEÇALHO ═══════════════════════════════════════════════════
+    els.append(Paragraph(ASSINATURA, ps("sig", fontName="Helvetica-Bold",
+                                         fontSize=7, textColor=NAVY, alignment=TA_CENTER)))
     els.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=5))
-    els.append(Paragraph("RELATÓRIO EXECUTIVO DE CRÉDITO", ps("t", fontName="Helvetica-Bold",
-                                                                 fontSize=14, textColor=NAVY)))
-    els.append(Paragraph(resultado.get("empresa",""), ps("st", fontName="Helvetica-Bold",
-                                                          fontSize=11, textColor=NAVY)))
+    els.append(Paragraph("RELATÓRIO EXECUTIVO DE CRÉDITO — ANÁLISE INDIVIDUAL",
+                          ps("t", fontName="Helvetica-Bold", fontSize=14, textColor=NAVY)))
+    ano_bal = resultado.get("balanco_detalhado", {}).get("ano_balanco", "")
+    subtitulo_empresa = f"{empresa}"
+    if ano_bal and ano_bal != "N/D":
+        subtitulo_empresa += f"  |  Balanço base: 31/12/{ano_bal}"
+    els.append(Paragraph(subtitulo_empresa, ps("st", fontName="Helvetica-Bold",
+                                      fontSize=11, textColor=NAVY, spaceAfter=3)))
+
+    # Dados cadastrais
+    score = resultado.get("score", 0)
+    rating = resultado.get("rating", "D")
+    pd_val = resultado.get("pd", 0)
+    risco = resultado.get("classificacao_risco", "alto")
+    sc_color = GRN if score >= 75 else YEL if score >= 50 else RED
+
+    cad = Table([
+        [Paragraph(f"CNPJ: <b>{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}</b>", ps("c1")),
+         Paragraph(f"Data-base: <b>{datetime.date.today().strftime('%d/%m/%Y')}</b>", ps("c1")),
+         Paragraph(f"Gerado em: <b>{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}</b>", ps("c1"))],
+    ], colWidths=[W*0.35, W*0.32, W*0.33])
+    cad.setStyle(TableStyle([
+        ("FONTSIZE",(0,0),(-1,-1),8), ("PADDING",(0,0),(-1,-1),3),
+    ]))
+    els.append(cad)
     els.append(Spacer(1,6))
 
-    # Header
-    hdata = [
-        ["CNPJ", resultado.get("cnpj",""), "Score", str(resultado.get("score",""))],
-        ["Rating", resultado.get("rating",""), "PD", f"{resultado.get('pd',0):.1f}%"],
-        ["Risco", resultado.get("classificacao_risco",""), "Analisado", str(resultado.get("analisado_em",""))[:19]],
-        ["Limite", resultado.get("limite_sugerido",""), "Prazo", resultado.get("prazo_sugerido","")],
-    ]
-    ht = Table(hdata, colWidths=[3*cm,7*cm,3*cm,5.6*cm])
-    ht.setStyle(TableStyle([
-        ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
-        ("FONTSIZE",(0,0),(-1,-1),8),("GRID",(0,0),(-1,-1),0.3,BORDER),
-        ("ROWBACKGROUNDS",(0,0),(-1,-1),[colors.white,LIGHT]),("PADDING",(0,0),(-1,-1),4),
+    # Painel de score
+    score_data = Table([
+        [Paragraph(f"<b>{score}</b>", ps("sc", fontName="Helvetica-Bold",
+                                          fontSize=32, textColor=sc_color, alignment=TA_CENTER)),
+         Paragraph(f"<b>{rating}</b>", ps("rat", fontName="Helvetica-Bold",
+                                           fontSize=28, textColor=sc_color, alignment=TA_CENTER)),
+         Paragraph(f"<b>{pd_val:.1f}%</b>", ps("pd", fontName="Helvetica-Bold",
+                                                  fontSize=22, textColor=RED, alignment=TA_CENTER)),
+         Paragraph(f"<b>{risco.upper()}</b>", ps("ris", fontName="Helvetica-Bold",
+                                                   fontSize=14, textColor=RED, alignment=TA_CENTER)),
+        ],
+        [Paragraph("Score", ps("sl", alignment=TA_CENTER, textColor=MUTED, fontSize=8)),
+         Paragraph("Rating", ps("sl2", alignment=TA_CENTER, textColor=MUTED, fontSize=8)),
+         Paragraph("PD Estimada", ps("sl3", alignment=TA_CENTER, textColor=MUTED, fontSize=8)),
+         Paragraph("Risco", ps("sl4", alignment=TA_CENTER, textColor=MUTED, fontSize=8)),
+        ],
+    ], colWidths=[W*0.2]*4)
+    score_data.setStyle(TableStyle([
+        ("GRID",(0,0),(-1,-1),0.3,BORD),
+        ("ROWBACKGROUNDS",(0,0),(-1,-1),[LIGHT, WHITE]),
+        ("PADDING",(0,0),(-1,-1),6),
+        ("ALIGN",(0,0),(-1,-1),"CENTER"),
     ]))
-    els.append(ht)
-    els.append(Spacer(1,8))
+    els.append(score_data)
+    els.append(Spacer(1,6))
 
-    # Flags
-    for titulo, items, cor in [
-        ("🔴 RED FLAGS", resultado.get("red_flags",[]), RED),
-        ("🟡 YELLOW FLAGS", resultado.get("yellow_flags",[]), YELLOW_C),
-        ("🟢 GREEN FLAGS", resultado.get("green_flags",[]), GREEN_C),
-    ]:
-        if items:
-            els.append(Paragraph(titulo, ps("fh", fontName="Helvetica-Bold", fontSize=9, textColor=cor, spaceBefore=6)))
-            for item in items[:15]:
-                els.append(Paragraph(f"• {str(item)[:180]}", ps("fi", fontSize=7.5, leading=11)))
-            els.append(Spacer(1,4))
+    # Recomendação
+    rec = Table([
+        [Paragraph("<b>LIMITE SUGERIDO</b>", ps("rl", fontSize=8, textColor=MUTED)),
+         Paragraph("<b>PRAZO</b>", ps("rp", fontSize=8, textColor=MUTED)),
+         Paragraph("<b>MONITORAMENTO</b>", ps("rm", fontSize=8, textColor=MUTED)),
+         Paragraph("<b>GARANTIAS</b>", ps("rg", fontSize=8, textColor=MUTED))],
+        [Paragraph(resultado.get("limite_sugerido",""), ps("rv")),
+         Paragraph(resultado.get("prazo_sugerido",""), ps("rv2")),
+         Paragraph(resultado.get("plano_monitoramento",""), ps("rv3")),
+         Paragraph(" | ".join(resultado.get("garantias_recomendadas",[])), ps("rv4"))],
+    ], colWidths=[W*0.28, W*0.15, W*0.32, W*0.25])
+    rec.setStyle(TableStyle([
+        ("GRID",(0,0),(-1,-1),0.3,BORD),
+        ("ROWBACKGROUNDS",(0,0),(-1,-1),[LIGHT, WHITE]),
+        ("PADDING",(0,0),(-1,-1),5),
+        ("FONTSIZE",(0,0),(-1,-1),8),
+    ]))
+    els.append(rec)
 
-    # Balanço
-    bal = resultado.get("balanco_detalhado",{})
+    # ═══ ANÁLISE FINANCEIRA ══════════════════════════════════════════
     if bal.get("disponivel"):
-        els.append(Paragraph("📊 ANÁLISE DE BALANÇO", ps("bh", fontName="Helvetica-Bold",
-                                                            fontSize=10, textColor=NAVY, spaceBefore=8)))
-        ind = bal.get("indicadores",{})
-        rows = []
-        for k,v in ind.items():
-            label = k.replace("_"," ").title()
-            if isinstance(v,float) and v > 1000:
-                rows.append([label, f"R$ {v:,.0f}"])
-            elif isinstance(v,float):
-                rows.append([label, f"{v:.2f}"])
-            else:
-                rows.append([label, str(v)])
-        if rows:
-            it = Table(rows, colWidths=[8*cm,10.6*cm])
-            it.setStyle(TableStyle([
-                ("FONTSIZE",(0,0),(-1,-1),7.5),("GRID",(0,0),(-1,-1),0.3,BORDER),
-                ("ROWBACKGROUNDS",(0,0),(-1,-1),[colors.white,LIGHT]),("PADDING",(0,0),(-1,-1),3),
-            ]))
-            els.append(it)
-        for titulo, items, cor in [
-            ("Red Flags", bal.get("red_flags",[]), RED),
-            ("Yellow Flags", bal.get("yellow_flags",[]), YELLOW_C),
-            ("Green Flags", bal.get("green_flags",[]), GREEN_C),
-        ]:
-            for item in items[:8]:
-                els.append(Paragraph(f"• {titulo}: {str(item)[:160]}", ps("bf", fontSize=7.5,
-                                                                            textColor=cor, leading=11)))
-        els.append(Spacer(1,6))
+        els += secao("ANÁLISE FINANCEIRA — BALANÇO E DEMONSTRATIVO DE RESULTADO")
 
-    # CISP
-    cisp = resultado.get("cisp_detalhado",{})
+        # DRE com % ROL
+        receita_liq = ind.get("receita_liquida", 0) or 1
+
+        def pct_rol(v):
+            if not v or not receita_liq: return "—"
+            return f"({v/receita_liq*100:.1f}%)"
+
+        def obs_dre(item, valor):
+            obs = {
+                "Receita Bruta": "Faturamento total antes das deduções",
+                "Deduções": "Devoluções + impostos sobre vendas",
+                "Receita Líquida (ROL)": "Base de cálculo das margens",
+                "CMV / CPI": "Custo das mercadorias vendidas",
+                "Lucro Bruto": f"Margem bruta: {fmt_pct(ind.get('margem_bruta'))}",
+                "Desp. Comerciais": "Vendas, marketing e comissões",
+                "Desp. Administrativas": "Overhead e estrutura",
+                "Desp. Financeiras Líq.": "Custo da dívida bancária",
+                "Lucro Operacional": "Resultado antes do financeiro",
+                "Lucro Líquido": f"Margem líquida: {fmt_pct(ind.get('margem_liquida'))}",
+                "EBITDA": "Geração operacional de caixa",
+                "FCO (Fluxo Caixa Op.)": "Caixa gerado/consumido nas operações",
+            }
+            return obs.get(item, "")
+
+        dre_items = [
+            ("Receita Bruta", ind.get("receita_bruta")),
+            ("Receita Líquida (ROL)", ind.get("receita_liquida")),
+            ("CMV / CPI", ind.get("cmv")),
+            ("Lucro Bruto", ind.get("lucro_bruto")),
+            ("Desp. Comerciais", ind.get("desp_vendas")),
+            ("Desp. Administrativas", ind.get("desp_admin")),
+            ("Desp. Financeiras Líq.", ind.get("desp_financeiras")),
+            ("EBITDA", ind.get("ebitda")),
+            ("Lucro Líquido", ind.get("lucro_liquido")),
+            ("FCO (Fluxo Caixa Op.)", ind.get("fco")),
+        ]
+        dre_rows = []
+        for item, valor in dre_items:
+            if valor is None: continue
+            neg = valor < 0 if isinstance(valor, (int,float)) else False
+            cor = RED if neg else BLACK
+            dre_rows.append([
+                Paragraph(item, ps("di")),
+                Paragraph(fmt_r(abs(valor) if valor else valor), ps("dv", alignment=TA_RIGHT,
+                    textColor=RED if neg else BLACK,
+                    fontName="Helvetica-Bold" if item in ("Lucro Líquido","Receita Líquida (ROL)","EBITDA") else "Helvetica")),
+                Paragraph(pct_rol(valor), ps("dp", alignment=TA_RIGHT, textColor=MUTED, fontSize=7)),
+                Paragraph(obs_dre(item, valor), ps("do", fontSize=7, textColor=MUTED)),
+            ])
+
+        if dre_rows:
+            els.append(Paragraph("2.1 — DRE Resumida", ps("sh", fontName="Helvetica-Bold",
+                                                            fontSize=9, textColor=NAVY)))
+            els.append(Spacer(1,3))
+            t = Table([["Item","Valor (R$)","% ROL","Observação"]] + dre_rows,
+                      colWidths=[W*0.28, W*0.20, W*0.10, W*0.42])
+            t.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),NAVY),
+                ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+                ("FONTSIZE",(0,0),(-1,-1),8),
+                ("GRID",(0,0),(-1,-1),0.3,BORD),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+                ("ALIGN",(1,0),(2,-1),"RIGHT"),
+                ("PADDING",(0,0),(-1,-1),4),
+                ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+            ]))
+            els.append(t)
+            els.append(Spacer(1,8))
+
+        # BP Resumido
+        def obs_bp(item, valor):
+            ativo_t = ind.get("ativo_total",1) or 1
+            pct = f"{abs(valor)/ativo_t*100:.1f}% do ativo" if valor and ativo_t else ""
+            obs = {
+                "ATIVO TOTAL": f"Base de análise",
+                "Caixa e Disponível": f"{pct} — {'Baixo' if valor and valor/ativo_t < 0.05 else 'Adequado'}",
+                "Clientes": f"{pct} — Prazo médio de recebimento",
+                "Estoques": f"{pct} — Distribuidor: giro é chave",
+                "Patrimônio Líquido": f"{pct} — {'Empresa capitalizada' if valor and valor/ativo_t > 0.4 else 'Atenção ao nível de capitalização'}",
+                "Empréstimos CP": f"{pct} — {'Mínimo' if valor and valor < 1000000 else 'Avaliar custo e vencimentos'}",
+                "Capital de Giro": "Ativo Circ. - Passivo Circ.",
+                "NCG": "Necessidade de financiamento do giro",
+            }
+            return obs.get(item, pct)
+
+        bp_items = [
+            ("ATIVO TOTAL", ind.get("ativo_total")),
+            ("Caixa e Disponível", ind.get("caixa_disponivel")),
+            ("Clientes", ind.get("clientes")),
+            ("Estoques", ind.get("estoques")),
+            ("Patrimônio Líquido", ind.get("patrimonio_liquido")),
+            ("Capital Social", ind.get("capital_social")),
+            ("Empréstimos CP", ind.get("emprestimos_cp")),
+            ("Capital de Giro", ind.get("capital_giro")),
+            ("NCG", ind.get("ncg")),
+        ]
+        bp_rows = []
+        for item, valor in bp_items:
+            if valor is None: continue
+            bold = item in ("ATIVO TOTAL","Patrimônio Líquido")
+            bp_rows.append([
+                Paragraph(item, ps("bi", fontName="Helvetica-Bold" if bold else "Helvetica")),
+                Paragraph(fmt_r(valor), ps("bv", alignment=TA_RIGHT,
+                    fontName="Helvetica-Bold" if bold else "Helvetica")),
+                Paragraph(obs_bp(item, valor), ps("bo", fontSize=7, textColor=MUTED)),
+            ])
+
+        if bp_rows:
+            els.append(Paragraph("2.2 — Balanço Patrimonial Resumido", ps("sh", fontName="Helvetica-Bold",
+                                                                            fontSize=9, textColor=NAVY)))
+            els.append(Spacer(1,3))
+            t = Table([["Conta","Valor (R$)","Observação"]] + bp_rows,
+                      colWidths=[W*0.30, W*0.22, W*0.48])
+            t.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),NAVY),
+                ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+                ("FONTSIZE",(0,0),(-1,-1),8),
+                ("GRID",(0,0),(-1,-1),0.3,BORD),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+                ("ALIGN",(1,0),(1,-1),"RIGHT"),
+                ("PADDING",(0,0),(-1,-1),4),
+            ]))
+            els.append(t)
+            els.append(Spacer(1,8))
+
+        # Indicadores-chave
+        def classif_ind(nome, valor):
+            classifs = {
+                "liquidez_corrente": lambda v: ("BOM — margem confortável", GRN) if v>=1.5 else ("ACEITÁVEL", YEL) if v>=1.0 else ("ATENÇÃO", RED),
+                "liquidez_geral": lambda v: ("BOM", GRN) if v>=1.2 else ("ATENÇÃO", YEL),
+                "liquidez_seca": lambda v: ("SATISFATÓRIO", GRN) if v>=0.8 else ("ATENÇÃO", YEL),
+                "margem_bruta": lambda v: ("BOA para distribuidora", GRN) if v>=20 else ("COMPRIMIDA", RED) if v<15 else ("MODERADA", YEL),
+                "margem_liquida": lambda v: ("SAUDÁVEL", GRN) if v>=5 else ("APERTADA", YEL) if v>=2 else ("CRÍTICA", RED),
+                "ciclo_financeiro": lambda v: ("EXCELENTE", GRN) if v<=30 else ("PÉSSIMO", RED) if v>90 else ("ATENÇÃO", YEL),
+                "fator_kanitz": lambda v: ("SOLVENTE", GRN) if v>0 else ("INSOLVÊNCIA", RED),
+                "pl_sobre_ativo": lambda v: ("EXCELENTE — empresa capitalizada", GRN) if v>=40 else ("BOM", YEL),
+            }
+            fn = classifs.get(nome)
+            if fn and valor is not None:
+                try: return fn(float(valor))
+                except: pass
+            return ("—", MUTED)
+
+        idx_items = [
+            ("Liquidez corrente (AC/PC)", "liquidez_corrente", fmt_mult),
+            ("Liquidez imediata (Disp./PC)", "liquidez_imediata", fmt_mult),
+            ("Liquidez geral", "liquidez_geral", fmt_mult),
+            ("Capital de giro líquido", "capital_giro", fmt_r),
+            ("PL / Ativo total", "pl_sobre_ativo", fmt_pct),
+            ("Margem bruta", "margem_bruta", fmt_pct),
+            ("Margem líquida", "margem_liquida", fmt_pct),
+            ("Ciclo financeiro (dias)", "ciclo_financeiro", lambda v: f"{v:.0f} dias" if v else "—"),
+            ("Fator Kanitz", "fator_kanitz", lambda v: f"{v:.2f}" if v else "—"),
+        ]
+        idx_rows = []
+        for label, key, fmt_fn in idx_items:
+            val = ind.get(key)
+            if val is None: continue
+            cl_text, cl_color = classif_ind(key, val)
+            idx_rows.append([
+                Paragraph(label, ps("ii")),
+                Paragraph(fmt_fn(val), ps("iv", alignment=TA_RIGHT, fontName="Helvetica-Bold")),
+                Paragraph(cl_text, ps("ic", textColor=cl_color, fontName="Helvetica-Bold", fontSize=7)),
+            ])
+
+        if idx_rows:
+            els.append(Paragraph("2.3 — Indicadores-Chave", ps("sh", fontName="Helvetica-Bold",
+                                                                  fontSize=9, textColor=NAVY)))
+            els.append(Spacer(1,3))
+            t = Table([["Indicador","Valor","Classificação"]] + idx_rows,
+                      colWidths=[W*0.40, W*0.18, W*0.42])
+            t.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),NAVY),
+                ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+                ("FONTSIZE",(0,0),(-1,-1),8),
+                ("GRID",(0,0),(-1,-1),0.3,BORD),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+                ("ALIGN",(1,0),(1,-1),"RIGHT"),
+                ("PADDING",(0,0),(-1,-1),4),
+            ]))
+            els.append(t)
+
+    # ═══ ANÁLISE CISP ════════════════════════════════════════════════
     if cisp.get("disponivel"):
-        els.append(Paragraph("📋 ANÁLISE CISP / CREDINFAR", ps("ch", fontName="Helvetica-Bold",
-                                                                  fontSize=10, textColor=NAVY, spaceBefore=6)))
-        cind = cisp.get("indicadores",{})
-        crowns = []
-        for k,v in cind.items():
-            label = k.replace("_"," ").title()
-            if isinstance(v,float) and v > 1000:
-                crowns.append([label, f"R$ {v:,.0f}"])
-            elif isinstance(v,float):
-                crowns.append([label, f"{v:.2f}"])
-            else:
-                crowns.append([label, str(v)])
-        if crowns:
-            ct = Table(crowns, colWidths=[8*cm,10.6*cm])
-            ct.setStyle(TableStyle([
-                ("FONTSIZE",(0,0),(-1,-1),7.5),("GRID",(0,0),(-1,-1),0.3,BORDER),
-                ("ROWBACKGROUNDS",(0,0),(-1,-1),[colors.white,LIGHT]),("PADDING",(0,0),(-1,-1),3),
-            ]))
-            els.append(ct)
-        for titulo, items, cor in [
-            ("Red", cisp.get("red_flags",[]), RED),
-            ("Yellow", cisp.get("yellow_flags",[]), YELLOW_C),
-            ("Green", cisp.get("green_flags",[]), GREEN_C),
-        ]:
-            for item in items[:6]:
-                els.append(Paragraph(f"• {titulo}: {str(item)[:160]}", ps("cf", fontSize=7.5,
-                                                                            textColor=cor, leading=11)))
-        els.append(Spacer(1,6))
+        els += secao("ANÁLISE CISP / CREDINFAR — COMPORTAMENTO COMERCIAL")
 
-    # Fontes
-    els.append(Paragraph("FONTES CONSULTADAS", ps("foh", fontName="Helvetica-Bold",
-                                                    fontSize=9, textColor=NAVY, spaceBefore=6)))
-    for f in resultado.get("fontes",[]):
-        els.append(Paragraph(f"[{f['status'].upper()}] {f['fonte']}: {f['resumo'][:120]}",
-                              ps("fo", fontSize=7, leading=10, textColor=colors.HexColor("#555"))))
+        debito = cisp_ind.get("debito_atual", 0) or 1
 
-    # Rodapé
-    els.append(Spacer(1,8))
+        cisp_rows = [
+            ("Débito atual total", fmt_r(cisp_ind.get("debito_atual")),
+             "Exposição total no mercado"),
+            ("Vencido +5 dias", fmt_r(cisp_ind.get("vencido_5d")),
+             f"{fmt_pct(cisp_ind.get('pct_vencido_5d'))} — {'🔴 Nível alto' if (cisp_ind.get('pct_vencido_5d') or 0)>=40 else '🟡 Atenção'}"),
+            ("Vencido +15 dias", fmt_r(cisp_ind.get("vencido_15d")),
+             f"{fmt_pct(cisp_ind.get('pct_vencido_15d'))} — {'🔴 Sinal forte de estresse' if (cisp_ind.get('pct_vencido_15d') or 0)>=30 else '🟡 Monitorar'}"),
+            ("Vencido +30 dias", fmt_r(cisp_ind.get("vencido_30d")),
+             f"{fmt_pct(cisp_ind.get('pct_vencido_30d'))} — {'🔴 Parcela madura crítica' if (cisp_ind.get('pct_vencido_30d') or 0)>=25 else '🟡 Atenção'}"),
+            ("Classe de risco", str(cisp_ind.get("classe_risco","—")),
+             f"Estável por {cisp_ind.get('meses_estabilidade','—')} meses" if cisp_ind.get("meses_estabilidade") else "Verificar histórico"),
+            ("Garantia / Seguro", fmt_r(cisp_ind.get("garantia_valor")),
+             f"Cobertura: {cisp_ind.get('garantia_valor',0)/debito*100:.1f}% da exposição" if cisp_ind.get("garantia_valor") else "Sem garantia registrada"),
+            ("Assoc. sem crédito (30d)", str(cisp_ind.get("assoc_sem_credito","—")),
+             "🔴 Mercado restringindo crédito" if (cisp_ind.get("assoc_sem_credito") or 0)>=50 else "Monitorar evolução"),
+        ]
+
+        t = Table([["Indicador","Valor","Leitura"]] +
+                  [[Paragraph(r[0], ps("ci")),
+                    Paragraph(r[1], ps("cv", alignment=TA_RIGHT, fontName="Helvetica-Bold")),
+                    Paragraph(r[2], ps("cl", fontSize=7, textColor=MUTED))] for r in cisp_rows],
+                  colWidths=[W*0.30, W*0.22, W*0.48])
+        t.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),NAVY),
+            ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+            ("FONTSIZE",(0,0),(-1,-1),8),
+            ("GRID",(0,0),(-1,-1),0.3,BORD),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+            ("ALIGN",(1,0),(1,-1),"RIGHT"),
+            ("PADDING",(0,0),(-1,-1),4),
+        ]))
+        els.append(t)
+
+    # ═══ FLAGS ═══════════════════════════════════════════════════════
+    els += secao("FLAGS DE RISCO E SINAIS POSITIVOS")
+
+    red_f = resultado.get("red_flags", [])
+    yel_f = resultado.get("yellow_flags", [])
+    grn_f = resultado.get("green_flags", [])
+    max_f = max(len(red_f), len(yel_f), len(grn_f), 1)
+
+    flag_header = [
+        Paragraph("🔴 RED FLAGS", ps("fh", fontName="Helvetica-Bold", fontSize=9, textColor=RED)),
+        Paragraph("🟡 YELLOW FLAGS", ps("fh2", fontName="Helvetica-Bold", fontSize=9, textColor=YEL)),
+        Paragraph("🟢 GREEN FLAGS", ps("fh3", fontName="Helvetica-Bold", fontSize=9, textColor=GRN)),
+    ]
+    flag_rows = [flag_header]
+    for i in range(max_f):
+        r = Paragraph(f"• {red_f[i]}", ps("fr", fontSize=7, textColor=colors.HexColor("#7f1d1d"), leading=11)) if i<len(red_f) else Paragraph("", ps("fe"))
+        y = Paragraph(f"• {yel_f[i]}", ps("fy", fontSize=7, textColor=colors.HexColor("#78350f"), leading=11)) if i<len(yel_f) else Paragraph("", ps("fe2"))
+        g = Paragraph(f"• {grn_f[i]}", ps("fg", fontSize=7, textColor=colors.HexColor("#064e3b"), leading=11)) if i<len(grn_f) else Paragraph("", ps("fe3"))
+        flag_rows.append([r, y, g])
+
+    tf = Table(flag_rows, colWidths=[W/3]*3)
+    tf.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(0,0), BGRED),
+        ("BACKGROUND",(1,0),(1,0), BGYL),
+        ("BACKGROUND",(2,0),(2,0), BGGRN),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE, LIGHT]),
+        ("GRID",(0,0),(-1,-1),0.3,BORD),
+        ("VALIGN",(0,0),(-1,-1),"TOP"),
+        ("PADDING",(0,0),(-1,-1),5),
+    ]))
+    els.append(tf)
+
+    # ═══ MEMÓRIA DE CÁLCULO ══════════════════════════════════════════
+    els += secao("MEMÓRIA DE CÁLCULO DO SCORE")
+
+    mem = resultado.get("memoria_calculo", {})
+    mem_rows = []
+    for k, v in mem.items():
+        if k == "score_final": continue
+        label = k.replace("_"," ").title()
+        sinal = "+" if isinstance(v,(int,float)) and v > 0 else ""
+        cor = GRN if isinstance(v,(int,float)) and v > 0 else RED if isinstance(v,(int,float)) and v < 0 else BLACK
+        mem_rows.append([
+            Paragraph(label, ps("mk")),
+            Paragraph(f"{sinal}{v}", ps("mv", fontName="Helvetica-Bold", textColor=cor, alignment=TA_RIGHT)),
+        ])
+    mem_rows.append([
+        Paragraph("SCORE FINAL", ps("mf", fontName="Helvetica-Bold", textColor=NAVY)),
+        Paragraph(str(mem.get("score_final","")),
+                  ps("mfv", fontName="Helvetica-Bold", fontSize=14,
+                     textColor=sc_color, alignment=TA_RIGHT)),
+    ])
+
+    tm = Table(mem_rows, colWidths=[W*0.7, W*0.3])
+    tm.setStyle(TableStyle([
+        ("FONTSIZE",(0,0),(-1,-1),8),
+        ("GRID",(0,0),(-1,-1),0.3,BORD),
+        ("ROWBACKGROUNDS",(0,0),(-1,-2),[WHITE,LIGHT]),
+        ("BACKGROUND",(0,-1),(-1,-1),NAVY),
+        ("TEXTCOLOR",(0,-1),(-1,-1),WHITE),
+        ("FONTNAME",(0,-1),(-1,-1),"Helvetica-Bold"),
+        ("PADDING",(0,0),(-1,-1),4),
+        ("ALIGN",(1,0),(1,-1),"RIGHT"),
+    ]))
+    els.append(tm)
+
+    # ═══ FONTES ══════════════════════════════════════════════════════
+    els += secao("FONTES CONSULTADAS — FRAMEWORK P.I.L.D.E.R™")
+
+    STATUS_LABEL = {
+        "confirmacao":"✓ CONFIRMADO","ausencia":"○ SEM OCORRÊNCIA",
+        "indicio":"⚡ INDÍCIO","pendente":"⏳ PENDENTE",
+        "nao_consultado":"— NÃO CONSULTADO","erro":"✗ ERRO",
+    }
+    STATUS_COLOR_MAP = {
+        "confirmacao":GRN,"ausencia":GRN,"indicio":YEL,
+        "pendente":MUTED,"nao_consultado":MUTED,"erro":RED,
+    }
+
+    fonte_rows = [["#","Fonte","Status","Pts","Resumo"]]
+    for i, f in enumerate(resultado.get("fontes",[])):
+        status = f.get("status","")
+        pts = f.get("pontos",0)
+        cor = STATUS_COLOR_MAP.get(status, MUTED)
+        fonte_rows.append([
+            Paragraph(str(i+1), ps("fn", alignment=TA_CENTER, fontSize=7)),
+            Paragraph(f.get("fonte",""), ps("ff", fontSize=7)),
+            Paragraph(STATUS_LABEL.get(status, status), ps("fs", fontSize=7, textColor=cor, fontName="Helvetica-Bold")),
+            Paragraph(f"{'+' if pts>0 else ''}{pts}", ps("fp", fontSize=7, alignment=TA_RIGHT,
+                textColor=GRN if pts>0 else RED if pts<0 else MUTED, fontName="Helvetica-Bold")),
+            Paragraph(f.get("resumo","")[:100], ps("fr2", fontSize=7, textColor=MUTED)),
+        ])
+
+    tf2 = Table(fonte_rows, colWidths=[0.8*cm, 5*cm, 3*cm, 1*cm, W-9.8*cm])
+    tf2.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(-1,0),NAVY),
+        ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+        ("FONTSIZE",(0,0),(-1,-1),7),
+        ("GRID",(0,0),(-1,-1),0.3,BORD),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+        ("PADDING",(0,0),(-1,-1),3),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+        ("ALIGN",(3,0),(3,-1),"RIGHT"),
+        ("ALIGN",(0,0),(0,-1),"CENTER"),
+    ]))
+    els.append(tf2)
+
+    # ═══ RODAPÉ ══════════════════════════════════════════════════════
+    els.append(Spacer(1,10))
     els.append(HRFlowable(width="100%", thickness=1, color=GOLD))
-    els.append(Paragraph(f"{ASSINATURA} | {dt.datetime.now().strftime('%d/%m/%Y %H:%M')} | CONFIDENCIAL",
-                          ps("rod", fontName="Helvetica-Bold", fontSize=7, textColor=NAVY, alignment=1)))
+    els.append(Paragraph(
+        f"{ASSINATURA} | {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | CONFIDENCIAL",
+        ps("rod", fontName="Helvetica-Bold", fontSize=7, textColor=NAVY, alignment=TA_CENTER)
+    ))
 
     doc.build(els)
     return buf.getvalue()
 
-# ══════════════════════════════════════════════════════════════════
+
+
+def gerar_pdf_bytes(resultado: dict) -> bytes:
+    """Wrapper — usa gerar_pdf_executivo (estilo Disdal com ano do balanço)."""
+    return gerar_pdf_executivo(resultado)
+
 # ROTAS
 # ══════════════════════════════════════════════════════════════════
 @app.get("/")
