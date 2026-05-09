@@ -110,17 +110,53 @@ function FonteRow({ fonte, idx }) {
   );
 }
 
-async function baixarPDF(cnpj) {
-  const res = await fetch(`${API}/api/pdf/${cnpj}`);
-  const data = await res.json();
-  const bytes = atob(data.pdf_base64);
-  const arr = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  const blob = new Blob([arr], { type:"application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = data.filename; a.click();
-  URL.revokeObjectURL(url);
+async function baixarPDFdoResultado(resultado, balanco, cisp, cnpj) {
+  // Tenta usar pdf_base64 do resultado primeiro
+  if (resultado?.pdf_base64) {
+    try {
+      // Limpa o base64 de qualquer caractere inválido
+      const b64 = resultado.pdf_base64.replace(/[^A-Za-z0-9+/=]/g, "");
+      const bytes = atob(b64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type:"application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = resultado.pdf_filename || `PILDER_${cnpj}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return;
+    } catch(e) {
+      console.warn("pdf_base64 falhou, tentando fallback:", e);
+    }
+  }
+  // Fallback: re-envia para o backend gerar PDF
+  try {
+    const form = new FormData();
+    form.append("cnpj", cnpj);
+    if (balanco) form.append("balanco", balanco);
+    if (cisp) form.append("cisp", cisp);
+    const res = await fetch(`${API}/api/analisar-completo`, { method:"POST", body:form });
+    const data = await res.json();
+    if (data?.pdf_base64) {
+      const b64 = data.pdf_base64.replace(/[^A-Za-z0-9+/=]/g, "");
+      const bytes = atob(b64);
+      const arr = new Uint8Array(bytes.length);
+      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+      const blob = new Blob([arr], { type:"application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `PILDER_${cnpj}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      alert("PDF não disponível. Verifique se os arquivos foram anexados.");
+    }
+  } catch(e) {
+    alert("Erro ao gerar PDF: " + e.message);
+  }
 }
 
 export default function AnalisePage() {
@@ -179,11 +215,8 @@ export default function AnalisePage() {
     }
   }
 
-  async function handlePDF() {
-    setPdfLoading(true);
-    try { await baixarPDF(cnpj); }
-    catch(e) { setErro("Erro ao gerar PDF: "+e.message); }
-    finally { setPdfLoading(false); }
+  function handlePDF() {
+    baixarPDFdoResultado(resultado, balanco, cisp, cnpj);
   }
 
   const r = resultado;
