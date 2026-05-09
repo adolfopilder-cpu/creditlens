@@ -110,49 +110,55 @@ function FonteRow({ fonte, idx }) {
   );
 }
 
+function b64ToBlob(b64, tipo) {
+  // Converte base64 para Blob de forma segura
+  const limpo = b64.replace(/\s/g, "");
+  const binStr = atob(limpo);
+  const bytes = new Uint8Array(binStr.length);
+  for (let i = 0; i < binStr.length; i++) {
+    bytes[i] = binStr.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: tipo });
+}
+
+function abrirBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 100);
+}
+
 async function baixarPDFdoResultado(resultado, balanco, cisp, cnpj) {
-  // Tenta usar pdf_base64 do resultado primeiro
+  // Tenta pdf_base64 do resultado
   if (resultado?.pdf_base64) {
     try {
-      // Limpa o base64 de qualquer caractere inválido
-      const b64 = resultado.pdf_base64.replace(/[^A-Za-z0-9+/=]/g, "");
-      const bytes = atob(b64);
-      const arr = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-      const blob = new Blob([arr], { type:"application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = resultado.pdf_filename || `PILDER_${cnpj}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const blob = b64ToBlob(resultado.pdf_base64, "application/pdf");
+      abrirBlob(blob, resultado.pdf_filename || `PILDER_${cnpj}.pdf`);
       return;
     } catch(e) {
-      console.warn("pdf_base64 falhou, tentando fallback:", e);
+      console.warn("pdf_base64 falhou:", e.message);
     }
   }
-  // Fallback: re-envia para o backend gerar PDF
+  // Fallback: re-envia ao backend
   try {
     const form = new FormData();
     form.append("cnpj", cnpj);
     if (balanco) form.append("balanco", balanco);
     if (cisp) form.append("cisp", cisp);
     const res = await fetch(`${API}/api/analisar-completo`, { method:"POST", body:form });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data?.pdf_base64) {
-      const b64 = data.pdf_base64.replace(/[^A-Za-z0-9+/=]/g, "");
-      const bytes = atob(b64);
-      const arr = new Uint8Array(bytes.length);
-      for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-      const blob = new Blob([arr], { type:"application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `PILDER_${cnpj}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const blob = b64ToBlob(data.pdf_base64, "application/pdf");
+      abrirBlob(blob, `PILDER_${cnpj}.pdf`);
     } else {
-      alert("PDF não disponível. Verifique se os arquivos foram anexados.");
+      alert("PDF não disponível: " + (data?.pdf_erro || "erro desconhecido"));
     }
   } catch(e) {
     alert("Erro ao gerar PDF: " + e.message);
