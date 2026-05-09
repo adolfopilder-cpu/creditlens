@@ -1,4 +1,5 @@
 // src/pages/AnalisePage.js — P.I.L.D.E.R™ v3.0 — tema bege
+import RelatorioFinanceiro from "../components/RelatorioFinanceiro";
 import RelatorioCompleto from "../components/RelatorioCompleto";
 import { useState } from "react";
 import { baixarPDF } from "../hooks/useApi";
@@ -456,6 +457,7 @@ setRelatorioCompleto(data.balanco_detalhado ? data : null);
         </>
       )}
 {relatorioCompleto && <RelatorioCompleto resultado={relatorioCompleto} />}
-    </div>
+  {r && <RelatorioFinanceiro resultado={r} />} 
+  </div>
   );
 }
