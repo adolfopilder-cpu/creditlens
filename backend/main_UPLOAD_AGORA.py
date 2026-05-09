@@ -816,16 +816,37 @@ async def analisar_com_anexo(
     cisp: Optional[UploadFile] = File(None),
 ):
     try:
-        bytes_bal = bytes_cisp = None
+        bytes_bal = bytes_cisp_data = None
         nome_bal = nome_cisp = ""
+        texto_bal = texto_cisp = ""
+
         if balanco:
             bytes_bal = await balanco.read()
             nome_bal = balanco.filename or ""
+            texto_bal = extrair_texto_arquivo(bytes_bal, nome_bal)
+
         if cisp:
-            bytes_cisp = await cisp.read()
+            bytes_cisp_data = await cisp.read()
             nome_cisp = cisp.filename or ""
-        resultado = analisar_cnpj_completo(cnpj, bytes_bal, bytes_cisp, nome_bal, nome_cisp)
-        return JSONResponse(content=resultado)
+            texto_cisp = extrair_texto_arquivo(bytes_cisp_data, nome_cisp)
+
+        resultado = analisar_cnpj_completo(
+            cnpj, bytes_bal, bytes_cisp_data, nome_bal, nome_cisp
+        )
+
+        # Analisa documentos com motor completo v3
+        bal = analisar_balanco_completo(texto_bal, nome_bal)
+        cisp_anal = analisar_cisp_completo(texto_cisp, nome_cisp)
+
+        relatorio = {
+            **resultado,
+            "balanco_detalhado": bal,
+            "cisp_detalhado": cisp_anal,
+            "assinatura": ASSINATURA,
+            "relatorio_gerado_em": dt.datetime.now().isoformat(),
+        }
+
+        return JSONResponse(content=relatorio)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -904,18 +925,14 @@ async def analisar_completo(
         bal = analisar_balanco_completo(texto_bal, nome_bal)
         cisp_anal = analisar_cisp_completo(texto_cisp, nome_cisp)
 
-        if HAS_ANALISE_DETALHADA:
-            relatorio = gerar_analise_completa(
-                resultado, bal, cisp_anal, texto_bal, texto_cisp
-            )
-        else:
-            relatorio = {
-                **resultado,
-                "balanco_detalhado": bal,
-                "cisp_detalhado": cisp_anal,
-                "assinatura": ASSINATURA,
-                "relatorio_gerado_em": dt.datetime.now().isoformat(),
-            }
+        # Sempre usa balanco/cisp do analise_financeira_v3 (versão completa)
+        relatorio = {
+            **resultado,
+            "balanco_detalhado": bal,
+            "cisp_detalhado": cisp_anal,
+            "assinatura": ASSINATURA,
+            "relatorio_gerado_em": dt.datetime.now().isoformat(),
+        }
 
         return JSONResponse(content=relatorio)
 
@@ -923,23 +940,7 @@ async def analisar_completo(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro: {e}")
-@app.post("/api/teste-upload")
-async def teste_upload(
-    cnpj: str = Form(...),
-    balanco: Optional[UploadFile] = File(None),
-    cisp: Optional[UploadFile] = File(None),
-):
-    bal_info = {"nome": balanco.filename, "tamanho": 0} if balanco else None
-    cisp_info = {"nome": cisp.filename, "tamanho": 0} if cisp else None
-    if balanco:
-        conteudo = await balanco.read()
-        bal_info["tamanho"] = len(conteudo)
-        bal_info["texto_chars"] = len(extrair_texto_arquivo(conteudo, balanco.filename))
-    if cisp:
-        conteudo = await cisp.read()
-        cisp_info["tamanho"] = len(conteudo)
-        cisp_info["texto_chars"] = len(extrair_texto_arquivo(conteudo, cisp.filename))
-    return {"cnpj": cnpj, "balanco": bal_info, "cisp": cisp_info}
+
 @app.get("/api/conectores")
 def status_conectores():
     base = {
