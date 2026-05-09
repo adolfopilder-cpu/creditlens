@@ -132,34 +132,61 @@ def fonte_ok(nome, status, resumo, detalhe="", pontos=0.0, raw=None):
 # ══════════════════════════════════════════════════════════════════
 # EXTRAÇÃO DE VALORES DOS PDFs
 # ══════════════════════════════════════════════════════════════════
+def parse_cisp_valor(s: str) -> float:
+    """Converte valor CISP: '10.238.2' → 10238200 (milhares com decimal)."""
+    s = s.strip()
+    partes = s.split(".")
+    if len(partes) == 3:
+        return float(f"{partes[0]}{partes[1]}.{partes[2]}") * 1000
+    elif len(partes) == 2:
+        return float(s.replace(".", "")) * 1000
+    return float(s) * 1000
+
+def extrai_terceiro_numero(texto: str, padrao: str) -> Optional[float]:
+    """Extrai 3o valor grande da linha (coluna 2024 em tabela 2022/2023/2024)."""
+    m = re.search(rf"^{padrao}(.*)", texto, re.IGNORECASE | re.MULTILINE)
+    if not m:
+        return None
+    linha = m.group(1)
+    nums = re.findall(r"[\d\.]+", linha)
+    grandes = []
+    for n in nums:
+        try:
+            v = float(n.replace(".", ""))
+            if v > 1000:
+                grandes.append(v)
+        except Exception:
+            continue
+    if len(grandes) >= 3:
+        return grandes[2]
+    elif grandes:
+        return grandes[-1]
+    return None
+
+def extrai_indice_2024(texto: str, padrao: str) -> Optional[float]:
+    """Extrai 3o índice de linha (valor 2024 em tabela 2022/2023/2024)."""
+    m = re.search(rf"{padrao}" + r"\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)",
+                  texto, re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(3).replace(",", "."))
+        except Exception:
+            pass
+    return None
+
 def extrair_valor(texto: str, *padroes) -> Optional[float]:
     for padrao in padroes:
-        # Tenta formato em MILHÕES: R$ X.XXXX mi
-        m = re.findall(rf"{padrao}[^\d\n]{{0,80}}R?\$?\s*([\d][\d\.,]{{0,10}})\s*mi\b",
-                       texto, re.IGNORECASE)
-        for v in m:
-            try:
-                return float(v.strip().replace(",",".")) * 1_000_000
-            except Exception:
-                continue
-        # Tenta formato em MILHARES com sufixo (CISP usa "em milhares")
-        m2 = re.findall(rf"{padrao}[^\d\n]{{0,80}}([\d][\d\.,]{{0,10}})\s*(?:mil|k)?\b",
-                        texto, re.IGNORECASE)
-        for v in m2:
-            try:
-                val = float(v.strip().replace(".", "").replace(",", "."))
-                if val > 0:
-                    return val
-            except Exception:
-                continue
+        v = extrai_terceiro_numero(texto, padrao)
+        if v:
+            return v
     return None
 
 def extrair_pct(texto: str, *padroes) -> Optional[float]:
     for padrao in padroes:
-        m = re.findall(rf"{padrao}[^\d\n]{{0,40}}([\d\.,]+)\s*%", texto, re.IGNORECASE)
+        m = re.findall(rf"{padrao}" + r"[^\d\n]{0,40}([\d\.,]+)\s*%", texto, re.IGNORECASE)
         for v in m:
             try:
-                return float(v.replace(",","."))
+                return float(v.replace(",", "."))
             except Exception:
                 continue
     return None
@@ -167,6 +194,7 @@ def extrair_pct(texto: str, *padroes) -> Optional[float]:
 def tem(texto: str, *termos) -> bool:
     tl = texto.lower()
     return any(t.lower() in tl for t in termos)
+
 
 # ══════════════════════════════════════════════════════════════════
 # ANÁLISE DE BALANÇO
@@ -183,9 +211,9 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
     pts = 0
 
     # DRE
-    receita_liq = extrair_valor(texto, r"receita l[íi]quida", r"receita operacional l[íi]quida", r"\brol\b")
+    receita_liq = extrai_terceiro_numero(texto, r"Receita Liquida")
     receita_bruta = extrair_valor(texto, r"receita bruta", r"receita operacional bruta")
-    lucro_liq = extrair_valor(texto, r"lucro l[íi]quido", r"lucro ou preju[íi]zo l[íi]quido", r"resultado l[íi]quido")
+    lucro_liq = extrai_terceiro_numero(texto, r"Lucro ou Preju[íi]zo L[íi]quido")
     lucro_bruto = extrair_valor(texto, r"lucro bruto")
     ebitda = extrair_valor(texto, r"ebitda")
     fco = extrair_valor(texto, r"fluxo de caixa operacional", r"caixa l[íi]quido das atividades operacionais")
@@ -215,8 +243,8 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
     pmr = extrair_valor(texto, r"prazo m[eé]dio.*receb", r"pmr\b")
     pmp = extrair_valor(texto, r"prazo m[eé]dio.*pag", r"pmp\b")
     pmre = extrair_valor(texto, r"prazo m[eé]dio.*estoque|pmre\b")
-    ciclo_fin = extrair_valor(texto, r"ciclo financeiro|ciclo caixa")
-    fator_kanitz = extrair_valor(texto, r"fator insolvencia|fator insolvência|kanitz")
+    ciclo_fin = extrai_indice_2024(texto, r"Ciclo Financeiro / Ciclo Caixa")
+    fator_kanitz = extrai_indice_2024(texto, r"Fator Insolvencia")
     ncg = extrair_valor(texto, r"necessidade de capital de giro|ncg\b")
     cgl = extrair_valor(texto, r"capital de giro\b")
 
@@ -465,25 +493,30 @@ def analisar_cisp(texto: str, nome: str = "") -> dict:
         v = extrair_valor(t, *p)
         return v * mult if v else None
 
-    # Débito total
-    debito = exv(texto, r"d[eé]bito atual\b", r"d[eé]bito total\b")
-    if not debito:
-        # Tenta pegar da linha de suporte (consultas últimos 30 dias)
-        m = re.search(r"D[eé]bito Atual:\s*([\d\.]+)", texto)
-        if m:
-            debito = float(m.group(1).replace(".", "").replace(",", ".")) * mult
+    # Débito total — formato CISP: "Débito Atual: 25.480.0"
+    debito = None
+    m_deb = re.search(r"D[eé]bito Atual:\s*([\d\.]+)", texto)
+    if m_deb:
+        try:
+            debito = parse_cisp_valor(m_deb.group(1))
+        except Exception:
+            pass
 
     if debito:
         ind["debito_atual"] = debito
 
     # Aging — busca padrões da CISP Credinfar
     def busca_aging(faixa):
-        # Padrão: "Vencido + 05 Dias: 10.238.2 (40.18%)"
-        m = re.search(rf"Vencido\s*\+\s*0?{faixa}\s*Dias:\s*([\d\.]+)\s*\(([\d\.]+)%\)", texto, re.IGNORECASE)
+        # Padrão CISP: "Vencido + 05 Dias: 10.238.2 (40.18%)"
+        m = re.search(rf"Vencido\s*\+\s*0?{faixa}\s*Dias:\s*([\d\.]+)\s*\(([\d\.]+)%\)",
+                      texto, re.IGNORECASE)
         if m:
-            v = float(m.group(1).replace(".", "").replace(",", ".")) * mult
-            pct = float(m.group(2))
-            return v, pct
+            try:
+                v = parse_cisp_valor(m.group(1))
+                pct = float(m.group(2))
+                return v, pct
+            except Exception:
+                pass
         return None, None
 
     venc_5d, pct_5d = busca_aging("5")
