@@ -923,7 +923,23 @@ async def analisar_completo(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro: {e}")
-
+@app.post("/api/teste-upload")
+async def teste_upload(
+    cnpj: str = Form(...),
+    balanco: Optional[UploadFile] = File(None),
+    cisp: Optional[UploadFile] = File(None),
+):
+    bal_info = {"nome": balanco.filename, "tamanho": 0} if balanco else None
+    cisp_info = {"nome": cisp.filename, "tamanho": 0} if cisp else None
+    if balanco:
+        conteudo = await balanco.read()
+        bal_info["tamanho"] = len(conteudo)
+        bal_info["texto_chars"] = len(extrair_texto_arquivo(conteudo, balanco.filename))
+    if cisp:
+        conteudo = await cisp.read()
+        cisp_info["tamanho"] = len(conteudo)
+        cisp_info["texto_chars"] = len(extrair_texto_arquivo(conteudo, cisp.filename))
+    return {"cnpj": cnpj, "balanco": bal_info, "cisp": cisp_info}
 @app.get("/api/conectores")
 def status_conectores():
     base = {
