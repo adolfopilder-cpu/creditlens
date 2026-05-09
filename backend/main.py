@@ -218,9 +218,20 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
     lucro_liq = extrai_terceiro_numero(texto, r"Lucro ou Preju[íi]zo L[íi]quido")
     lucro_bruto = extrair_valor(texto, r"lucro bruto")
     ebitda = extrair_valor(texto, r"ebitda")
-    fco = extrair_valor(texto, r"fluxo de caixa operacional", r"caixa l[íi]quido das atividades operacionais")
-    fco_neg = tem(texto, "fluxo de caixa operacional\n-", "caixa líquido das atividades operacionais -",
-                  "-30.021", "-3.213")
+    # FCO — busca valor na linha, detecta se negativo
+    fco = None
+    fco_neg = False
+    m_fco = re.search(r"(?:FLUXO DE CAIXA OPERACIONAL|CAIXA L[ÍI]QUIDO DAS ATIVIDADES OPERACIONAIS)\s*([-\d\.,]+)",
+                      texto, re.IGNORECASE)
+    if m_fco:
+        try:
+            fco_str = m_fco.group(1).strip()
+            fco_neg = fco_str.startswith("-")
+            fco = abs(float(fco_str.replace(".", "").replace(",", ".")))
+        except Exception:
+            pass
+    if not fco:
+        fco_neg = tem(texto, "-30.021", "-3.213")
     desp_fin = extrair_valor(texto, r"financeiras l[íi]quidas", r"despesas financeiras")
 
     # Balanço
@@ -280,8 +291,11 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
             ind[k] = round(v, 2) if isinstance(v, float) else v
 
     # ── FLAGS ──
-    # Lucro/Prejuízo
-    if tem(texto, "prejuízo do exercício", "prejuízo líquido", "lucro ou prejuízo líquido\n-"):
+    # Lucro/Prejuízo — detecta se o valor de lucro_liq é negativo
+    if lucro_liq and lucro_liq < 0:
+        red.append(f"🔴 Resultado NEGATIVO: R$ {lucro_liq:,.0f} — empresa com prejuízo")
+        pts -= 15
+    elif tem(texto, "prejuízo do exercício") and not lucro_liq:
         red.append("🔴 Resultado NEGATIVO — empresa operando com prejuízo")
         pts -= 15
     elif lucro_liq:
@@ -607,10 +621,13 @@ def analisar_cisp(texto: str, nome: str = "") -> dict:
         red.append("🔴 ALERTA AUTOMÁTICO registrado na própria ficha CISP")
         pts -= 8
 
-    # Garantia
-    m_gar = re.search(r"seguro de cr[eé]dito.*?([\d\.]+)", texto, re.IGNORECASE)
+    # Garantia — pega último valor da linha (ex: "SEGURO DE CREDITO 99 OUTRAS 31/12/2026 3.300.0")
+    m_gar = re.search(r"seguro de cr[eé]dito.*?([\d\.]+)\s*$", texto, re.IGNORECASE | re.MULTILINE)
     if m_gar:
-        gval = float(m_gar.group(1).replace(".", "").replace(",", ".")) * mult
+        try:
+            gval = parse_cisp_valor(m_gar.group(1))
+        except Exception:
+            gval = 0
         ind["garantia_valor"] = gval
         cob = round(gval/debito*100, 1) if debito else 0
         if cob < 20:
