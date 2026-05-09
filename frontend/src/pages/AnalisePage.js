@@ -110,59 +110,32 @@ function FonteRow({ fonte, idx }) {
   );
 }
 
-function b64ToBlob(b64, tipo) {
-  // Converte base64 para Blob de forma segura
-  const limpo = b64.replace(/\s/g, "");
-  const binStr = atob(limpo);
-  const bytes = new Uint8Array(binStr.length);
-  for (let i = 0; i < binStr.length; i++) {
-    bytes[i] = binStr.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: tipo });
-}
+async function baixarPDFdoResultado(resultado, balanco, cisp, cnpj) {
+  // Reenvia ao backend e recebe o PDF como blob diretamente
+  const form = new FormData();
+  form.append("cnpj", cnpj);
+  if (balanco) form.append("balanco", balanco);
+  if (cisp) form.append("cisp", cisp);
 
-function abrirBlob(blob, filename) {
+  const res = await fetch(`${API}/api/pdf-download`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+
+  // Recebe como blob PDF diretamente
+  const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = `PILDER_${cnpj}.pdf`;
   document.body.appendChild(a);
   a.click();
-  setTimeout(() => {
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, 100);
-}
-
-async function baixarPDFdoResultado(resultado, balanco, cisp, cnpj) {
-  // Tenta pdf_base64 do resultado
-  if (resultado?.pdf_base64) {
-    try {
-      const blob = b64ToBlob(resultado.pdf_base64, "application/pdf");
-      abrirBlob(blob, resultado.pdf_filename || `PILDER_${cnpj}.pdf`);
-      return;
-    } catch(e) {
-      console.warn("pdf_base64 falhou:", e.message);
-    }
-  }
-  // Fallback: re-envia ao backend
-  try {
-    const form = new FormData();
-    form.append("cnpj", cnpj);
-    if (balanco) form.append("balanco", balanco);
-    if (cisp) form.append("cisp", cisp);
-    const res = await fetch(`${API}/api/analisar-completo`, { method:"POST", body:form });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (data?.pdf_base64) {
-      const blob = b64ToBlob(data.pdf_base64, "application/pdf");
-      abrirBlob(blob, `PILDER_${cnpj}.pdf`);
-    } else {
-      alert("PDF não disponível: " + (data?.pdf_erro || "erro desconhecido"));
-    }
-  } catch(e) {
-    alert("Erro ao gerar PDF: " + e.message);
-  }
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
 }
 
 export default function AnalisePage() {
@@ -171,6 +144,7 @@ export default function AnalisePage() {
   const [resultado, setResultado] = useState(null);
   const [erro, setErro] = useState("");
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfErro, setPdfErro] = useState("");
   const [balanco, setBalanco] = useState(null);
   const [cisp, setCisp] = useState(null);
   const [filtroFonte, setFiltroFonte] = useState("todas");
@@ -221,8 +195,16 @@ export default function AnalisePage() {
     }
   }
 
-  function handlePDF() {
-    baixarPDFdoResultado(resultado, balanco, cisp, cnpj);
+  async function handlePDF() {
+    setPdfLoading(true);
+    setPdfErro("");
+    try {
+      await baixarPDFdoResultado(resultado, balanco, cisp, cnpj);
+    } catch(e) {
+      setPdfErro(e.message);
+    } finally {
+      setPdfLoading(false);
+    }
   }
 
   const r = resultado;
@@ -267,11 +249,18 @@ export default function AnalisePage() {
             </button>
             {r && (
               <button type="button" onClick={handlePDF} disabled={pdfLoading} style={{
-                background:BG, border:`1px solid ${BORDER}`, borderRadius:8,
+                background: pdfLoading ? BORDER : BG,
+                border:`1px solid ${BORDER}`, borderRadius:8,
                 padding:"12px 20px", color:NAVY, fontSize:13,
-                cursor:"pointer", fontWeight:600 }}>
-                {pdfLoading?"Gerando...":"⬇ PDF"}
+                cursor: pdfLoading ? "wait" : "pointer", fontWeight:600 }}>
+                {pdfLoading ? "⏳ Gerando PDF..." : "⬇ PDF"}
               </button>
+            )}
+            {pdfErro && (
+              <div style={{ fontSize:11, color:"#c0392b", alignSelf:"center",
+                maxWidth:200, lineHeight:1.3 }}>
+                ⚠ {pdfErro}
+              </div>
             )}
           </div>
 
