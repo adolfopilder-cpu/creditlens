@@ -1093,10 +1093,15 @@ async def analisar_completo(
         # Gera PDF com os mesmos dados — inclui balanço e CISP
         try:
             pdf_bytes = gerar_pdf_bytes(resultado)
-            resultado["pdf_base64"] = base64.b64encode(pdf_bytes).decode("ascii")
+            # Garante encoding ASCII limpo
+            b64 = base64.b64encode(pdf_bytes).decode("ascii")
+            # Valida o base64 gerado
+            base64.b64decode(b64)
+            resultado["pdf_base64"] = b64
             resultado["pdf_filename"] = f"PILDER_{limpar_cnpj(cnpj)}.pdf"
-        except Exception:
+        except Exception as pdf_err:
             resultado["pdf_base64"] = None
+            resultado["pdf_erro"] = str(pdf_err)[:200]
 
         return JSONResponse(content=resultado)
 
