@@ -144,10 +144,12 @@ def parse_cisp_valor(s: str) -> float:
 
 def extrai_terceiro_numero(texto: str, padrao: str) -> Optional[float]:
     """Extrai 3o valor grande da linha (coluna 2024 em tabela 2022/2023/2024)."""
+    if not texto:
+        return None
     m = re.search(rf"^{padrao}(.*)", texto, re.IGNORECASE | re.MULTILINE)
     if not m:
         return None
-    linha = m.group(1)
+    linha = m.group(1) or ""
     nums = re.findall(r"[\d\.]+", linha)
     grandes = []
     for n in nums:
