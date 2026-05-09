@@ -10,7 +10,7 @@ from typing import Optional
 import requests
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 import pandas as pd
 from reportlab.lib import colors
@@ -1462,7 +1462,44 @@ async def processar_lote(file: UploadFile = File(...)):
         raise
     except Exception as e:
         raise HTTPException(500, detail=str(e))
+@app.post("/api/pdf-download")
+async def pdf_download(
+    cnpj: str = Form(...),
+    balanco: Optional[UploadFile] = File(None),
+    cisp: Optional[UploadFile] = File(None),
+):
+    """Gera PDF e retorna como arquivo para download direto."""
+    try:
+        texto_bal = nome_bal = ""
+        texto_cisp = nome_cisp = ""
 
+        if balanco:
+            b = await balanco.read()
+            nome_bal = balanco.filename or ""
+            texto_bal = extrair_texto_arquivo(b, nome_bal)
+
+        if cisp:
+            b = await cisp.read()
+            nome_cisp = cisp.filename or ""
+            texto_cisp = extrair_texto_arquivo(b, nome_cisp)
+
+        resultado = analisar_cnpj(
+            limpar_cnpj(cnpj), texto_bal, nome_bal, texto_cisp, nome_cisp
+        )
+
+        pdf_bytes = gerar_pdf_bytes(resultado)
+        filename = f"PILDER_{limpar_cnpj(cnpj)}.pdf"
+
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Length": str(len(pdf_bytes)),
+            }
+        )
+    except Exception as e:
+        raise HTTPException(500, detail=str(e))
 @app.get("/api/conectores")
 def conectores():
     return {
