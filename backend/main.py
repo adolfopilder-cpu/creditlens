@@ -48,6 +48,15 @@ try:
 except ImportError:
     HAS_ANALISE_DETALHADA = False
 
+try:
+    from analise_financeira_v3 import (
+        analisar_balanco_completo as _bal_v3,
+        analisar_cisp_completo as _cisp_v3,
+    )
+    HAS_FINANCEIRA_V3 = True
+except ImportError:
+    HAS_FINANCEIRA_V3 = False
+
 app = FastAPI(title="P.I.L.D.E.R PRO API", version="4.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
@@ -194,545 +203,84 @@ def extrair_valor_monetario(texto: str, padrao: str) -> Optional[float]:
                 except: continue
     return None
 
+
+# =========================
+# Análise Financeira — usa módulo analise_financeira_v3 se disponível
+# =========================
 def analisar_balanco_completo(texto: str, nome_arquivo: str = "") -> dict:
-    """
-    Análise REAL do conteúdo extraído do balanço.
-    Atua como Gestor Financeiro Sênior.
-    """
+    """Análise completa de balanço — usa v3 se disponível."""
+    if HAS_FINANCEIRA_V3:
+        return _bal_v3(texto, nome_arquivo)
     if not texto or len(texto.strip()) < 100:
         return {
-            "disponivel": False,
-            "texto_extraido": "",
-            "paginas": 0,
+            "disponivel": False, "arquivo": nome_arquivo,
             "status": "nao_consultado",
-            "resumo": "Arquivo anexado mas sem texto extraível. Pode ser PDF escaneado sem OCR.",
-            "pontos": -8,
-            "red_flags": [],
-            "yellow_flags": [],
-            "green_flags": [],
-            "indicadores": {},
-            "parecer_gestor": (
-                f"{ASSINATURA}\n\n"
-                "PARECER DE BALANÇO — GESTOR FINANCEIRO SÊNIOR\n\n"
-                "Documento recebido mas sem conteúdo textual extraível. "
-                "Possíveis causas: PDF escaneado sem OCR, arquivo protegido ou imagem. "
-                "Recomendo solicitação de novo arquivo em formato editável (Excel, CSV ou PDF com texto selecionável). "
-                "Avaliação financeira aplicada de forma conservadora."
-            ),
+            "resumo": "Arquivo sem texto extraível ou não anexado",
+            "pontos": -8, "red_flags": [], "yellow_flags": [],
+            "green_flags": [], "indicadores": {},
+            "parecer_gestor": f"{ASSINATURA}\nSem demonstrações financeiras disponíveis.",
         }
-
     t = texto.lower()
-    paginas = texto.count("[página")
-    red_flags = []
-    yellow_flags = []
-    green_flags = []
-    indicadores = {}
+    red, yellow, green = [], [], []
     pts = 0
-
-    # ── RESULTADO / LUCRO / PREJUÍZO ──────────────────────────────────────
-    if any(p in t for p in ["prejuízo do exercício", "prejuízo líquido", "resultado negativo",
-                              "lucro negativo", "deficit", "perda líquida"]):
-        red_flags.append("🔴 Resultado líquido NEGATIVO identificado — empresa operando com prejuízo")
-        pts -= 12
-
-    elif any(p in t for p in ["lucro do exercício", "lucro líquido", "resultado positivo",
-                                "lucro antes", "resultado do exercício"]):
-        # Tenta extrair o valor
-        val = extrair_valor_monetario(texto, r"lucro l[íi]quido|lucro do exerc[íi]cio")
-        if val:
-            green_flags.append(f"🟢 Lucro líquido identificado: R$ {val:,.2f}")
-        else:
-            green_flags.append("🟢 Resultado positivo (lucro) identificado no exercício")
-        pts += 8
-
-    # ── RECEITA ───────────────────────────────────────────────────────────
-    receita_val = extrair_valor_monetario(texto, r"receita l[íi]quida|receita bruta|faturamento")
-    if receita_val:
-        indicadores["receita_liquida"] = receita_val
-        green_flags.append(f"🟢 Receita líquida identificada: R$ {receita_val:,.2f}")
-        pts += 3
-
-    if any(p in t for p in ["queda de receita", "redução de receita", "receita caiu",
-                              "retração", "redução no faturamento"]):
-        red_flags.append("🔴 Queda/redução de receita mencionada — risco de continuidade")
-        pts -= 8
-
-    if any(p in t for p in ["crescimento de receita", "aumento de receita", "expansão",
-                              "crescimento do faturamento"]):
-        green_flags.append("🟢 Crescimento de receita registrado")
-        pts += 5
-
-    # ── PATRIMÔNIO LÍQUIDO ────────────────────────────────────────────────
-    pl_val = extrair_valor_monetario(texto, r"patrim[oô]nio l[íi]quido|pl ")
-    if pl_val:
-        indicadores["patrimonio_liquido"] = pl_val
-        green_flags.append(f"🟢 Patrimônio líquido identificado: R$ {pl_val:,.2f}")
-        pts += 4
-
-    if any(p in t for p in ["patrimônio líquido negativo", "pl negativo",
-                              "passivo a descoberto", "capital negativo"]):
-        red_flags.append("🔴 PATRIMÔNIO LÍQUIDO NEGATIVO — passivo a descoberto / insolvência técnica")
-        pts -= 20
-
-    # ── ENDIVIDAMENTO / PASSIVO ───────────────────────────────────────────
-    passivo_val = extrair_valor_monetario(texto, r"passivo total|total do passivo|total passivo")
-    if passivo_val:
-        indicadores["passivo_total"] = passivo_val
-
-    if any(p in t for p in ["dívidas de longo prazo", "financiamentos de longo prazo",
-                              "empréstimos de longo prazo"]):
-        val = extrair_valor_monetario(texto, r"d[íi]vidas|financiamentos|empr[eé]stimos")
-        msg = f"R$ {val:,.2f}" if val else "valor não extraído"
-        yellow_flags.append(f"🟡 Endividamento de longo prazo identificado ({msg}) — avaliar capacidade de pagamento")
-        pts -= 4
-
-    if any(p in t for p in ["endividamento elevado", "alta alavancagem", "sobre-endividamento"]):
-        red_flags.append("🔴 Endividamento elevado / alta alavancagem mencionado")
-        pts -= 10
-
-    # ── LIQUIDEZ ──────────────────────────────────────────────────────────
-    if any(p in t for p in ["liquidez corrente", "índice de liquidez"]):
-        val = extrair_valor_monetario(texto, r"liquidez corrente|[íi]ndice de liquidez")
-        if val:
-            indicadores["liquidez_corrente"] = val
-            if val >= 1.5:
-                green_flags.append(f"🟢 Liquidez corrente saudável: {val:.2f}")
-                pts += 8
-            elif val >= 1.0:
-                yellow_flags.append(f"🟡 Liquidez corrente aceitável mas próxima do limite: {val:.2f}")
-                pts += 2
-            else:
-                red_flags.append(f"🔴 Liquidez corrente abaixo de 1,0 ({val:.2f}) — risco de inadimplência com fornecedores")
-                pts -= 12
-
-    # ── EBITDA / MARGEM ───────────────────────────────────────────────────
-    if "ebitda" in t:
-        val = extrair_valor_monetario(texto, r"ebitda")
-        if val:
-            indicadores["ebitda"] = val
-            green_flags.append(f"🟢 EBITDA identificado: R$ {val:,.2f}")
-            pts += 5
-        else:
-            yellow_flags.append("🟡 EBITDA mencionado mas valor não extraído — solicitar demonstração detalhada")
-
-    if any(p in t for p in ["margem negativa", "margem líquida negativa"]):
-        red_flags.append("🔴 Margem líquida negativa identificada — resultado operacional comprometido")
-        pts -= 10
-
-    if any(p in t for p in ["margem positiva", "boa margem", "margem cresceu"]):
-        green_flags.append("🟢 Margem positiva/crescente identificada")
-        pts += 4
-
-    # ── FLUXO DE CAIXA ────────────────────────────────────────────────────
-    if any(p in t for p in ["fluxo de caixa negativo", "saída de caixa", "queima de caixa",
-                              "cash burn", "caixa negativo"]):
-        red_flags.append("🔴 Fluxo de caixa negativo — consumo de recursos operacionais")
-        pts -= 14
-
-    if any(p in t for p in ["geração de caixa", "fluxo positivo", "caixa gerado",
-                              "fluxo de caixa positivo"]):
-        green_flags.append("🟢 Geração de caixa positiva identificada")
-        pts += 6
-
-    # ── AUDITORIA ─────────────────────────────────────────────────────────
-    if any(p in t for p in ["ressalva", "opinião com ressalva", "exceto por"]):
-        red_flags.append("🔴 RESSALVA DE AUDITORIA identificada — verificar natureza e materialidade")
-        pts -= 8
-
-    if any(p in t for p in ["sem ressalva", "opinião não modificada", "auditoria independente",
-                              "opinião limpa"]):
-        green_flags.append("🟢 Balanço auditado sem ressalvas")
-        pts += 5
-
-    # ── SINAIS DE RJ / STRESS CRÍTICOS ───────────────────────────────────
+    ind = {}
+    if any(p in t for p in ["prejuízo", "resultado negativo", "lucro negativo"]):
+        red.append("🔴 Resultado negativo identificado"); pts -= 12
+    if any(p in t for p in ["lucro líquido", "lucro do exercício"]):
+        green.append("🟢 Resultado positivo (lucro) identificado"); pts += 8
     if "recuperação judicial" in t:
-        red_flags.append("🔴🚨 RECUPERAÇÃO JUDICIAL mencionada no documento — RISCO CRÍTICO")
-        pts -= 45
-
-    if any(p in t for p in ["concordata", "falência", "insolvência", "liquidação"]):
-        red_flags.append("🔴🚨 Termo crítico identificado: concordata/falência/insolvência/liquidação")
-        pts -= 30
-
-    if "parcelamento de dívida" in t or "renegociação" in t:
-        yellow_flags.append("🟡 Parcelamento ou renegociação de dívidas mencionado — sinal de stress financeiro anterior")
-        pts -= 5
-
-    # ── CAPITAL SOCIAL ────────────────────────────────────────────────────
-    capital = extrair_valor_monetario(texto, r"capital social")
-    if capital:
-        indicadores["capital_social"] = capital
-        green_flags.append(f"🟢 Capital social identificado: R$ {capital:,.2f}")
-        pts += 2
-
-    # ── RESERVAS / DIVIDENDOS ─────────────────────────────────────────────
-    if any(p in t for p in ["reserva de lucros", "reserva legal", "retenção de lucros"]):
-        green_flags.append("🟢 Reservas de lucros identificadas — empresa retém resultados")
-        pts += 3
-
-    if "distribuição de dividendos" in t or "juros sobre capital próprio" in t:
-        green_flags.append("🟢 Distribuição de dividendos/JCP — empresa remunera acionistas")
-        pts += 2
-
-    # ── IMOBILIZADO / ATIVO ───────────────────────────────────────────────
-    ativo_total = extrair_valor_monetario(texto, r"ativo total|total do ativo|total ativo")
-    if ativo_total:
-        indicadores["ativo_total"] = ativo_total
-        green_flags.append(f"🟢 Ativo total identificado: R$ {ativo_total:,.2f}")
-
-    # ── GERA PARECER DO GESTOR ────────────────────────────────────────────
-    parecer = _gerar_parecer_gestor(red_flags, yellow_flags, green_flags, indicadores, pts, paginas, nome_arquivo)
-
-    status = "confirmacao" if not red_flags and green_flags else \
-             "indicio" if len(red_flags) <= 1 else "erro"
-
-    resumo_partes = []
-    if red_flags:
-        resumo_partes.append(f"⚠ {len(red_flags)} RED FLAG(S)")
-    if yellow_flags:
-        resumo_partes.append(f"{len(yellow_flags)} atenção")
-    if green_flags:
-        resumo_partes.append(f"{len(green_flags)} positivo(s)")
-    resumo = " | ".join(resumo_partes) if resumo_partes else "Balanço analisado sem sinais críticos"
-
+        red.append("🔴🚨 RECUPERAÇÃO JUDICIAL mencionada"); pts -= 45
+    if "patrimônio líquido negativo" in t or "passivo a descoberto" in t:
+        red.append("🔴 Patrimônio líquido negativo"); pts -= 20
+    if "ressalva" in t:
+        red.append("🔴 Ressalva de auditoria identificada"); pts -= 8
+    if any(p in t for p in ["sem auditoria", "internos", "não auditado"]):
+        red.append("🔴 Demonstrativos sem auditoria externa"); pts -= 5
+    status = "confirmacao" if not red and green else "indicio" if len(red) <= 1 else "erro"
     return {
-        "disponivel": True,
-        "arquivo": nome_arquivo,
-        "paginas": paginas or 1,
-        "texto_extraido": texto[:2000] + "..." if len(texto) > 2000 else texto,
-        "status": status,
-        "resumo": resumo,
-        "pontos": int(round(clamp(pts, -50, 25))),
-        "red_flags": red_flags,
-        "yellow_flags": yellow_flags,
-        "green_flags": green_flags,
-        "indicadores": indicadores,
-        "parecer_gestor": parecer,
+        "disponivel": True, "arquivo": nome_arquivo, "status": status,
+        "resumo": f"{len(red)} red | {len(yellow)} yellow | {len(green)} green",
+        "pontos": int(max(-50, min(25, pts))),
+        "red_flags": red, "yellow_flags": yellow, "green_flags": green,
+        "indicadores": ind,
+        "parecer_gestor": f"{ASSINATURA}\nAnálise heurística básica. Instale analise_financeira_v3.py para análise completa.",
     }
 
 
-def _gerar_parecer_gestor(red_flags, yellow_flags, green_flags, indicadores, pts, paginas, arquivo):
-    """Gera parecer como Gestor Financeiro Sênior."""
-    linhas = [
-        f"{ASSINATURA}",
-        f"PARECER DE ANÁLISE DE BALANÇO — GESTOR FINANCEIRO SÊNIOR",
-        f"Arquivo: {arquivo} | Páginas lidas: {paginas} | Pontuação financeira: {'+' if pts > 0 else ''}{pts}",
-        "=" * 60,
-    ]
-
-    if red_flags:
-        linhas.append("\n🔴 RED FLAGS — ALERTAS CRÍTICOS:")
-        for f in red_flags:
-            linhas.append(f"  {f}")
-        linhas.append("")
-
-    if yellow_flags:
-        linhas.append("🟡 YELLOW FLAGS — PONTOS DE ATENÇÃO:")
-        for f in yellow_flags:
-            linhas.append(f"  {f}")
-        linhas.append("")
-
-    if green_flags:
-        linhas.append("🟢 GREEN FLAGS — ASPECTOS POSITIVOS:")
-        for f in green_flags:
-            linhas.append(f"  {f}")
-        linhas.append("")
-
-    if indicadores:
-        linhas.append("📊 INDICADORES EXTRAÍDOS DO DOCUMENTO:")
-        for k, v in indicadores.items():
-            label = k.replace("_", " ").title()
-            if isinstance(v, float) and v > 100:
-                linhas.append(f"  {label}: R$ {v:,.2f}")
-            elif isinstance(v, float):
-                linhas.append(f"  {label}: {v:.2f}")
-            else:
-                linhas.append(f"  {label}: {v}")
-        linhas.append("")
-
-    # Conclusão
-    linhas.append("📋 CONCLUSÃO DO GESTOR:")
-    if any("recuperação judicial" in f.lower() or "falência" in f.lower() for f in red_flags):
-        linhas.append("  SITUAÇÃO CRÍTICA. Empresa com sinal explícito de recuperação judicial ou insolvência.")
-        linhas.append("  RECOMENDAÇÃO: NEGAR crédito. Acionar jurídico e revisar toda a carteira com este cliente.")
-    elif len(red_flags) >= 3:
-        linhas.append("  Perfil financeiro DETERIORADO. Múltiplos sinais de stress identificados.")
-        linhas.append("  RECOMENDAÇÃO: Restringir limite ao mínimo. Exigir garantias reais e aval pessoal dos sócios.")
-    elif len(red_flags) >= 1:
-        linhas.append("  Perfil financeiro sob PRESSÃO. Sinais de alerta presentes.")
-        linhas.append("  RECOMENDAÇÃO: Aprovar com cautela. Limite reduzido, prazo curto, monitoramento mensal.")
-    elif len(yellow_flags) >= 2:
-        linhas.append("  Perfil financeiro MODERADO. Pontos de atenção que merecem acompanhamento.")
-        linhas.append("  RECOMENDAÇÃO: Aprovar com monitoramento trimestral e revisão de limite.")
-    elif green_flags:
-        linhas.append("  Perfil financeiro SAUDÁVEL. Indicadores positivos predominam.")
-        linhas.append("  RECOMENDAÇÃO: Aprovar conforme política interna. Monitoramento semestral.")
-    else:
-        linhas.append("  Análise inconclusiva — poucos dados estruturados extraídos do documento.")
-        linhas.append("  RECOMENDAÇÃO: Solicitar balanço auditado em formato estruturado para análise completa.")
-
-    return "\n".join(linhas)
-
-
-# =========================
-# Análise REAL de Ficha CISP
-# =========================
 def analisar_cisp_completo(texto: str, nome_arquivo: str = "") -> dict:
-    """Análise real da ficha CISP como Gestor Financeiro."""
+    """Análise completa de ficha CISP — usa v3 se disponível."""
+    if HAS_FINANCEIRA_V3:
+        return _cisp_v3(texto, nome_arquivo)
     if not texto or len(texto.strip()) < 50:
         return {
-            "disponivel": False,
-            "arquivo": nome_arquivo,
+            "disponivel": False, "arquivo": nome_arquivo,
             "status": "nao_consultado",
-            "resumo": "Ficha CISP não anexada ou sem conteúdo.",
-            "pontos": 0,
-            "red_flags": [],
-            "yellow_flags": [],
-            "green_flags": [],
-            "parecer_gestor": "Sem ficha CISP para análise de comportamento interno.",
+            "resumo": "Ficha CISP não disponível",
+            "pontos": 0, "red_flags": [], "yellow_flags": [],
+            "green_flags": [], "indicadores": {},
+            "parecer_gestor": "Sem ficha CISP para análise comportamental.",
         }
-
     t = texto.lower()
-    red_flags = []
-    yellow_flags = []
-    green_flags = []
+    red, yellow, green = [], [], []
     pts = 0
-
-    # Inadimplência
-    if any(p in t for p in ["inadimplente", "em atraso", "vencido há", "atraso recorrente",
-                              "bloqueado", "negativado", "protesto"]):
-        red_flags.append("🔴 Histórico de inadimplência/atraso identificado na ficha")
-        pts -= 12
-
-    # Status positivo
-    if any(p in t for p in ["adimplente", "bom pagador", "pontual", "em dia", "sem restrição"]):
-        green_flags.append("🟢 Histórico positivo de pagamento — cliente pontual")
-        pts += 8
-
-    # Aging
-    for periodo in ["90", "60", "120"]:
-        if f"acima de {periodo}" in t or f"> {periodo}" in t or f"+{periodo}" in t:
-            red_flags.append(f"🔴 Aging acima de {periodo} dias identificado — nível crítico de inadimplência")
-            pts -= 8
-
-    # Limite e aprovações
-    val_limite = extrair_valor_monetario(texto, r"limite|limite de cr[eé]dito|limite aprovado")
-    if val_limite:
-        green_flags.append(f"🟢 Limite de crédito registrado: R$ {val_limite:,.2f}")
-        pts += 3
-
-    # Score/rating interno
-    if any(p in t for p in ["score", "rating", "classificação"]):
-        yellow_flags.append("🟡 Score/rating interno mencionado — verificar nota e histórico de evolução")
-
-    # Concentração
-    if any(p in t for p in ["concentração alta", "concentração elevada", "cliente concentrado"]):
-        yellow_flags.append("🟡 Alta concentração de risco — cliente representa parcela relevante da carteira")
-        pts -= 5
-
-    # Garantias
-    if any(p in t for p in ["garantia", "aval", "fiador", "hipoteca", "penhor"]):
-        green_flags.append("🟢 Garantia ou aval formalizado registrado na ficha")
-        pts += 5
-
-    # Relacionamento
-    if any(p in t for p in ["cliente há", "anos de relacionamento", "relacionamento de longo"]):
-        green_flags.append("🟢 Relacionamento comercial de longo prazo com a empresa")
-        pts += 4
-
-    # Volume em aberto
-    vol = extrair_valor_monetario(texto, r"volume em aberto|saldo devedor|d[eé]bito atual|em aberto")
-    if vol:
-        yellow_flags.append(f"🟡 Volume em aberto identificado: R$ {vol:,.2f}")
-        pts -= 3
-
-    # Gera parecer
-    linhas = [
-        f"{ASSINATURA}",
-        "PARECER DE FICHA CISP / COMPORTAMENTO INTERNO",
-        f"Arquivo: {nome_arquivo}",
-        "=" * 60,
-    ]
-    if red_flags:
-        linhas.append("\n🔴 RED FLAGS:")
-        for f in red_flags: linhas.append(f"  {f}")
-    if yellow_flags:
-        linhas.append("\n🟡 YELLOW FLAGS:")
-        for f in yellow_flags: linhas.append(f"  {f}")
-    if green_flags:
-        linhas.append("\n🟢 GREEN FLAGS:")
-        for f in green_flags: linhas.append(f"  {f}")
-
-    linhas.append("\n📋 PARECER DO GESTOR:")
-    if red_flags:
-        linhas.append("  Comportamento interno PREOCUPANTE. Histórico negativo identificado.")
-        linhas.append("  RECOMENDAÇÃO: Revisão imediata do limite. Cobrança ativa. Considerar redução ou bloqueio.")
-    elif yellow_flags and not green_flags:
-        linhas.append("  Comportamento interno MODERADO. Pontos de atenção presentes.")
-        linhas.append("  RECOMENDAÇÃO: Monitoramento mensal. Manter limite atual com cautela.")
-    elif green_flags:
-        linhas.append("  Comportamento interno POSITIVO. Cliente com histórico favorável.")
-        linhas.append("  RECOMENDAÇÃO: Manter ou ampliar limite conforme política. Revisão semestral.")
-
+    ind = {}
+    if any(p in t for p in ["inadimplente", "em atraso", "bloqueado"]):
+        red.append("🔴 Histórico de inadimplência identificado"); pts -= 12
+    if any(p in t for p in ["adimplente", "bom pagador", "pontual"]):
+        green.append("🟢 Histórico positivo de pagamento"); pts += 8
+    if "cheque sem fundos" in t or "ccf" in t:
+        red.append("🔴 Cheque sem fundos registrado"); pts -= 15
+    status = "confirmacao" if not red and green else "erro" if red else "indicio"
     return {
-        "disponivel": True,
-        "arquivo": nome_arquivo,
-        "status": "confirmacao" if not red_flags else "erro",
-        "resumo": f"{len(red_flags)} red | {len(yellow_flags)} yellow | {len(green_flags)} green",
-        "pontos": int(round(clamp(pts, -20, 15))),
-        "red_flags": red_flags,
-        "yellow_flags": yellow_flags,
-        "green_flags": green_flags,
-        "parecer_gestor": "\n".join(linhas),
+        "disponivel": True, "arquivo": nome_arquivo, "status": status,
+        "resumo": f"{len(red)} red | {len(yellow)} yellow | {len(green)} green",
+        "pontos": int(max(-30, min(15, pts))),
+        "red_flags": red, "yellow_flags": yellow, "green_flags": green,
+        "indicadores": ind,
+        "parecer_gestor": f"{ASSINATURA}\nAnálise heurística básica. Instale analise_financeira_v3.py para análise completa.",
     }
 
 
-# =========================
-# Adaptadores de fontes (mantidos da v3)
-# =========================
-def consultar_receita(cnpj):
-    for url in [f"https://brasilapi.com.br/api/cnpj/v1/{cnpj}",
-                f"https://receitaws.com.br/v1/cnpj/{cnpj}"]:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-            if r.status_code != 200: continue
-            j = r.json()
-            razao = j.get("razao_social","") or j.get("nome","")
-            situacao = j.get("descricao_situacao_cadastral","") or j.get("situacao","")
-            abertura = j.get("data_inicio_atividade","") or j.get("abertura","")
-            cnae = j.get("cnae_fiscal_descricao","") or ""
-            capital = apenas_numero(j.get("capital_social"))
-            uf = j.get("uf","")
-            municipio = j.get("municipio","")
-            qsa = j.get("qsa",[]) or []
-            anos = years_since(abertura)
-            ativa = "ativa" in situacao.lower() if situacao else False
-            pts = 8 if ativa else -15
-            if anos: pts += 8 if anos>=10 else 4 if anos>=3 else -4
-            if capital > 0: pts += 2
-            if qsa: pts += 2
-            return {**fonte_resultado("Receita Federal / Cadastro CNPJ",
-                "confirmacao" if ativa else "indicio",
-                f"{'ATIVA' if ativa else situacao} | {anos:.1f} anos | {uf}/{municipio}",
-                f"Razão: {razao} | CNAE: {cnae} | Capital: R$ {capital:,.2f} | Sócios: {len(qsa)}",
-                pts, j),
-                "razao_social": razao, "situacao": situacao, "abertura": abertura,
-                "cnae": cnae, "capital": capital, "uf": uf, "municipio": municipio,
-                "qsa": qsa, "anos_mercado": anos}
-        except: continue
-    return fonte_resultado("Receita Federal / Cadastro CNPJ", "erro", "Falha em todas as fontes", pontos=-8)
-
-def consultar_simples(cnpj):
-    try:
-        r = requests.get(f"https://brasilapi.com.br/api/simples/v1/{cnpj}", headers=HEADERS, timeout=TIMEOUT)
-        if r.status_code == 200:
-            j = r.json()
-            simples = j.get("simples_nacional", False) or j.get("optante_simples_nacional", False)
-            mei = j.get("mei", False)
-            return fonte_resultado("Simples Nacional / MEI", "confirmacao",
-                f"{'Optante Simples' if simples else 'Não optante'} | MEI: {'Sim' if mei else 'Não'}",
-                "", 2 if simples else 0, j)
-    except: pass
-    return fonte_resultado("Simples Nacional / MEI", "nao_consultado", "Indisponível")
-
-def consultar_ceis(cnpj):
-    try:
-        url = f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj}&pagina=1"
-        r = requests.get(url, headers={**HEADERS,"chave-api-dados":"demo"}, timeout=TIMEOUT)
-        if r.status_code == 200:
-            dados = r.json()
-            if isinstance(dados, list) and len(dados) > 0:
-                return fonte_resultado("CEIS – Empresas Inidôneas e Suspensas", "confirmacao",
-                    f"⚠ LISTADA NO CEIS: {len(dados)} sanção(ões)", str(dados[0])[:200], -25)
-            return fonte_resultado("CEIS", "ausencia", "Sem registros no CEIS", "", 3)
-    except: pass
-    return fonte_resultado("CEIS", "nao_consultado", "Consulta CEIS não disponível", "", -2)
-
-def consultar_cnep(cnpj):
-    try:
-        url = f"https://api.portaldatransparencia.gov.br/api-de-dados/cnep?cnpjSancionado={cnpj}&pagina=1"
-        r = requests.get(url, headers={**HEADERS,"chave-api-dados":"demo"}, timeout=TIMEOUT)
-        if r.status_code == 200:
-            dados = r.json()
-            if isinstance(dados, list) and len(dados) > 0:
-                return fonte_resultado("CNEP – Empresas Punidas", "confirmacao",
-                    f"⚠ LISTADA NO CNEP: {len(dados)} punição(ões)", str(dados[0])[:200], -20)
-            return fonte_resultado("CNEP", "ausencia", "Sem registros", "", 3)
-    except: pass
-    return fonte_resultado("CNEP", "nao_consultado", "Indisponível", "", -2)
-
-def consultar_datajud(cnpj, razao_social=""):
-    api_key = "APIKey cDZHYzlZa0JadVREZDJCendFbXNpTDQxNDJ"
-    tribunais = [("TJSP","api_publica_tjsp"),("TJRJ","api_publica_tjrj"),
-                 ("TJMG","api_publica_tjmg"),("TRF1","api_publica_trf1"),
-                 ("TRT2","api_publica_trt2")]
-    total = execucoes = trabalhistas = 0
-    rj = False
-    detalhes = []
-    for nome, idx in tribunais:
-        try:
-            url = f"https://api-publica.datajud.cnj.jus.br/{idx}/_search"
-            payload = {"query":{"bool":{"should":[
-                {"match":{"numeroProcesso":cnpj}},
-                {"match_phrase":{"partes.nome":razao_social}} if razao_social else {}
-            ]}},"size":50}
-            r = requests.post(url, json=payload, headers={**HEADERS,"Authorization":api_key}, timeout=15)
-            if r.status_code == 200:
-                hits = r.json().get("hits",{})
-                t = hits.get("total",{}).get("value",0)
-                total += t
-                itens = hits.get("hits",[])
-                e = sum(1 for h in itens if "execu" in str(h.get("_source",{}).get("classeProcessual","")).lower())
-                tb = sum(1 for h in itens if "trabalh" in str(h.get("_source",{}).get("classeProcessual","")).lower())
-                execucoes += e; trabalhistas += tb
-                if any("recupera" in str(h.get("_source",{})).lower() for h in itens): rj = True
-                if t > 0: detalhes.append(f"{nome}: {t} proc | exec:{e} trab:{tb}")
-        except: pass
-    pts = 0
-    if rj: pts -= 45
-    if execucoes >= 10: pts -= 12
-    elif execucoes > 0: pts -= 5
-    if total >= 100: pts -= 10
-    elif total >= 20: pts -= 5
-    elif total > 0: pts += 2
-    else: pts += 3
-    resumo = f"{total} processo(s) | Execuções: {execucoes} | Trabalhistas: {trabalhistas}"
-    if rj: resumo = "⚠ RECUPERAÇÃO JUDICIAL | " + resumo
-    return fonte_resultado("DataJud / CNJ – Processos Judiciais",
-        "confirmacao" if total > 0 else "ausencia", resumo,
-        " | ".join(detalhes) or "Sem processos", pts,
-        {"total":total,"execucoes":execucoes,"trabalhistas":trabalhistas,"rj":rj})
-
-def consultar_noticias(razao_social):
-    try:
-        termo = razao_social.replace(" ","+")
-        url = f"https://news.google.com/rss/search?q={termo}+fraude+OR+escandalo+OR+falencia+OR+recuperacao&hl=pt-BR&gl=BR&ceid=BR:pt-419"
-        r = requests.get(url, headers=HEADERS, timeout=10)
-        if r.status_code == 200:
-            count = r.text.count("<item>")
-            if count > 5:
-                return fonte_resultado("Reputação / Mídia", "indicio",
-                    f"⚠ {count} notícias negativas encontradas", "", -8)
-            elif count > 0:
-                return fonte_resultado("Reputação / Mídia", "indicio",
-                    f"{count} notícia(s) com termos negativos", "", -3)
-            return fonte_resultado("Reputação / Mídia", "ausencia", "Sem notícias negativas", "", 2)
-    except: pass
-    return fonte_resultado("Reputação / Mídia", "nao_consultado", "Indisponível", "", -2)
-
-def classificar_setor(cnae):
-    cnae_lower = (cnae or "").lower()
-    HIGH = ["cobran","constru","transporte","moda","varejista","factoring"]
-    LOW = ["energia","saneamento","farmac","alimentos","saude","educac"]
-    risco = "medio_alto" if any(t in cnae_lower for t in HIGH) else \
-            "baixo" if any(t in cnae_lower for t in LOW) else "medio"
-    pts = {"baixo":8,"medio":2,"medio_alto":-6}.get(risco,0)
-    return {**fonte_resultado("Classificação Setorial CNAE","indicio",
-        f"Setor: {cnae[:60]} | Risco: {risco}","",pts),
-        "risco_setorial":risco,"setor":cnae}
-
-# =========================
-# Motor de Score
-# =========================
 def calcular_score(fontes, bal, cisp):
     base = 50.0
     pts_fontes = sum(f.get("pontos",0) for f in fontes)
