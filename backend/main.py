@@ -920,6 +920,8 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     rec = consultar_receita(cnpj)
     razao = rec.get("razao_social","")
     cnae = rec.get("cnae","")
+    # Pega UF real da Receita Federal (ex: PA para Okajima)
+    uf_real = rec.get("uf","") or uf or "SP"
 
     fontes = [
         rec,
@@ -929,8 +931,8 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         classificar_setor(cnae),
     ]
 
-    # Chama worker PythonAnywhere para PGFN + Junta Comercial
-    worker_fontes = consultar_worker(cnpj, razao, uf or "SP", ["pgfn", "junta"])
+    # Chama worker PythonAnywhere para PGFN + Junta Comercial da UF correta
+    worker_fontes = consultar_worker(cnpj, razao, uf_real, ["pgfn", "junta"])
     if worker_fontes:
         fontes.extend(worker_fontes)
     else:
