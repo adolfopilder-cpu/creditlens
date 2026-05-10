@@ -5,7 +5,7 @@ Tudo em um arquivo. Sem imports externos que quebram.
 Fluxo: CNPJ + PDF → extrai texto → analisa → score → JSON + PDF base64
 """
 from __future__ import annotations
-import base64, datetime as dt, datetime, io, json, os, re, traceback
+import base64, datetime as dt, io, json, os, re, traceback
 from typing import Optional
 import requests
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -20,6 +20,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+
 try:
     import pdfplumber
     HAS_PDFPLUMBER = True
@@ -33,6 +34,7 @@ except ImportError:
     HAS_PYPDF = False
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
+WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
 
@@ -249,7 +251,18 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
     reservas = extrair_valor(texto, r"reserv.*luc|luc.*acumulados")
 
     # Índices diretos
-    liq_corrente = extrair_valor(texto, r"liquidez corrente", r"corrente\b.*\d")
+    # Liquidez corrente — linha Credinfar: "Corrente 2,76 2,35 1,89 1,48 BOM"
+    # Pega o 3o valor (2024), não o 4o (padrão do setor)
+    liq_corrente = None
+    m_lc = re.search(r"^Corrente\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)",
+                     texto, re.IGNORECASE | re.MULTILINE)
+    if m_lc:
+        try:
+            v = float(m_lc.group(3).replace(",", "."))
+            if v < 20:  # descarta valores absurdos como 4865
+                liq_corrente = v
+        except Exception:
+            pass
     if not liq_corrente and ativo_circ and passivo_circ and passivo_circ > 0:
         liq_corrente = round(ativo_circ / passivo_circ, 2)
     liq_geral = extrair_valor(texto, r"liquidez geral", r"geral\b.*\d")
@@ -258,7 +271,9 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
     pmp = extrair_valor(texto, r"prazo m[eé]dio.*pag", r"pmp\b")
     pmre = extrair_valor(texto, r"prazo m[eé]dio.*estoque|pmre\b")
     ciclo_fin = extrai_indice_2024(texto, r"Ciclo Financeiro / Ciclo Caixa")
-    fator_kanitz = extrai_indice_2024(texto, r"Fator Insolvencia")
+    m_fk = re.search(r"Fator Insolvencia\s*=?\s*([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)",
+                     texto, re.IGNORECASE)
+    fator_kanitz = float(m_fk.group(3).replace(",",".")) if m_fk else None
     ncg = extrair_valor(texto, r"necessidade de capital de giro|ncg\b")
     cgl = extrair_valor(texto, r"capital de giro\b")
 
@@ -718,6 +733,34 @@ def _parecer_cisp(red, yellow, green, ind, pts, arquivo, debito):
     return "\n".join(linhas)
 
 # ══════════════════════════════════════════════════════════════════
+# WORKER PYTHONANYWHERE — fontes que o Render não acessa
+# ══════════════════════════════════════════════════════════════════
+def consultar_worker(cnpj: str, razao: str, uf: str, fontes: list) -> list:
+    """Chama o worker PythonAnywhere para fontes que o Render não acessa."""
+    if not WORKER_URL:
+        return []
+    try:
+        payload = json.dumps({
+            "cnpj": cnpj,
+            "razao_social": razao,
+            "uf": uf,
+            "fontes": fontes,
+        }).encode()
+        req = urllib.request.Request(
+            f"{WORKER_URL}/consultar",
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "PILDER-Render/5.0"},
+        )
+        with urllib.request.urlopen(req, timeout=25) as r:
+            data = json.loads(r.read())
+            return data.get("resultados", [])
+    except Exception as e:
+        return [fonte_ok(
+            "Worker PythonAnywhere", "nao_consultado",
+            f"Worker indisponível: {str(e)[:80]}", "", 0
+        )]
+
+# ══════════════════════════════════════════════════════════════════
 # FONTES PÚBLICAS
 # ══════════════════════════════════════════════════════════════════
 def consultar_receita(cnpj):
@@ -869,7 +912,7 @@ def calcular_score(fontes, bal, cisp):
 # ORQUESTRAÇÃO
 # ══════════════════════════════════════════════════════════════════
 def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
-                   texto_cisp: str = "", nome_cisp: str = "") -> dict:
+                   texto_cisp: str = "", nome_cisp: str = "", uf: str = "") -> dict:
     if not validar_cnpj(cnpj):
         raise ValueError(f"CNPJ inválido: {cnpj}")
 
@@ -883,13 +926,22 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         consultar_datajud(cnpj, razao),
         consultar_noticias(razao),
         classificar_setor(cnae),
-        fonte_ok("PGFN / Dívida Ativa","pendente",
-            "Consultar em listadevedores.pgfn.gov.br — ausência NÃO equivale a regularidade","",-5),
+    ]
+
+    # Chama worker PythonAnywhere para PGFN + Junta Comercial
+    worker_fontes = consultar_worker(cnpj, razao, uf or "SP", ["pgfn", "junta"])
+    if worker_fontes:
+        fontes.extend(worker_fontes)
+    else:
+        fontes.append(fonte_ok("PGFN / Dívida Ativa","pendente",
+            "Consultar em listadevedores.pgfn.gov.br — ausência NÃO equivale a regularidade","",-5))
+
+    fontes.extend([
         fonte_ok("TST / CNDT","pendente","Emitir em cndt.tst.jus.br","",-3),
         fonte_ok("FGTS / CRF","pendente","CRF via caixa.gov.br","",-3),
         fonte_ok("Protestos / IEPTB","pendente","Consulta via bureau especializado","",-4),
         fonte_ok("Bureau de Crédito","pendente","Score bureau requer contrato","",-6),
-    ]
+    ])
 
     bal = analisar_balanco(texto_bal, nome_bal)
     cisp = analisar_cisp(texto_cisp, nome_cisp)
@@ -1456,8 +1508,13 @@ async def analisar_completo(
             nome_cisp = cisp.filename or ""
             texto_cisp = extrair_texto_arquivo(b, nome_cisp)
 
+        # Pega UF da Receita para chamar o worker correto
+        rec_tmp = consultar_receita(limpar_cnpj(cnpj))
+        uf_empresa = rec_tmp.get("uf", "SP") if rec_tmp else "SP"
+
         resultado = analisar_cnpj(
-            limpar_cnpj(cnpj), texto_bal, nome_bal, texto_cisp, nome_cisp
+            limpar_cnpj(cnpj), texto_bal, nome_bal, texto_cisp, nome_cisp,
+            uf=uf_empresa
         )
 
         # Gera PDF com os mesmos dados — inclui balanço e CISP
