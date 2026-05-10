@@ -812,34 +812,291 @@ def consultar_ceis(cnpj):
         pass
     return fonte_ok("CEIS/CNEP – Sanções","nao_consultado","Indisponível","",-2)
 
-def consultar_datajud(cnpj, razao=""):
+def consultar_datajud(cnpj, razao="", uf=""):
+    """
+    DataJud CNJ — consulta todos os tribunais relevantes.
+    Extrai: polo ativo/passivo, classe processual, valor da causa,
+    execuções fiscais, trabalhistas, RJ/falência, movimentações.
+    """
     api_key = "APIKey cDZHYzlZa0JadVREZDJCendFbXNpTDQxNDJ"
-    tribunais = [("TJSP","api_publica_tjsp"),("TJRJ","api_publica_tjrj"),
-                 ("TRF1","api_publica_trf1"),("TRT2","api_publica_trt2")]
-    total = exec_ = trab = 0; rj = False
-    for nome, idx in tribunais:
+    headers_dj = {**HEADERS, "Authorization": api_key, "Content-Type": "application/json"}
+
+    # Todos os tribunais mapeados
+    TRIBUNAIS = {
+        # Estaduais principais
+        "TJSP": "api_publica_tjsp",
+        "TJRJ": "api_publica_tjrj",
+        "TJMG": "api_publica_tjmg",
+        "TJRS": "api_publica_tjrs",
+        "TJPR": "api_publica_tjpr",
+        "TJSC": "api_publica_tjsc",
+        "TJBA": "api_publica_tjba",
+        "TJPE": "api_publica_tjpe",
+        "TJCE": "api_publica_tjce",
+        "TJGO": "api_publica_tjgo",
+        "TJMA": "api_publica_tjma",
+        "TJPA": "api_publica_tjpa",
+        "TJAM": "api_publica_tjam",
+        "TJMT": "api_publica_tjmt",
+        "TJMS": "api_publica_tjms",
+        "TJES": "api_publica_tjes",
+        "TJRN": "api_publica_tjrn",
+        "TJPB": "api_publica_tjpb",
+        "TJAL": "api_publica_tjal",
+        "TJSE": "api_publica_tjse",
+        "TJPI": "api_publica_tjpi",
+        "TJTO": "api_publica_tjto",
+        "TJRO": "api_publica_tjro",
+        "TJAC": "api_publica_tjac",
+        "TJAP": "api_publica_tjap",
+        "TJRR": "api_publica_tjrr",
+        "TJDF": "api_publica_tjdft",
+        # Federais
+        "TRF1": "api_publica_trf1",
+        "TRF2": "api_publica_trf2",
+        "TRF3": "api_publica_trf3",
+        "TRF4": "api_publica_trf4",
+        "TRF5": "api_publica_trf5",
+        "TRF6": "api_publica_trf6",
+        # Trabalhistas
+        "TST":  "api_publica_tst",
+        "TRT1": "api_publica_trt1",
+        "TRT2": "api_publica_trt2",
+        "TRT3": "api_publica_trt3",
+        "TRT4": "api_publica_trt4",
+        "TRT5": "api_publica_trt5",
+        "TRT6": "api_publica_trt6",
+        "TRT7": "api_publica_trt7",
+        "TRT8": "api_publica_trt8",
+        "TRT9": "api_publica_trt9",
+        "TRT10":"api_publica_trt10",
+        "TRT11":"api_publica_trt11",
+        "TRT12":"api_publica_trt12",
+        "TRT13":"api_publica_trt13",
+        "TRT14":"api_publica_trt14",
+        "TRT15":"api_publica_trt15",
+        "TRT16":"api_publica_trt16",
+        "TRT17":"api_publica_trt17",
+        "TRT18":"api_publica_trt18",
+        "TRT19":"api_publica_trt19",
+        "TRT20":"api_publica_trt20",
+        "TRT21":"api_publica_trt21",
+        "TRT22":"api_publica_trt22",
+        "TRT23":"api_publica_trt23",
+        "TRT24":"api_publica_trt24",
+    }
+
+    # Mapa UF → tribunais prioritários
+    UF_TRIBUNAIS = {
+        "SP": ["TJSP", "TRF3", "TRT2", "TRT15"],
+        "RJ": ["TJRJ", "TRF2", "TRT1"],
+        "MG": ["TJMG", "TRF1", "TRT3"],
+        "RS": ["TJRS", "TRF4", "TRT4"],
+        "PR": ["TJPR", "TRF4", "TRT9"],
+        "SC": ["TJSC", "TRF4", "TRT12"],
+        "BA": ["TJBA", "TRF1", "TRT5"],
+        "PE": ["TJPE", "TRF5", "TRT6"],
+        "CE": ["TJCE", "TRF5", "TRT7"],
+        "GO": ["TJGO", "TRF1", "TRT18"],
+        "MT": ["TJMT", "TRF1", "TRT23"],
+        "MS": ["TJMS", "TRF3", "TRT24"],
+        "PA": ["TJPA", "TRF1", "TRT8"],
+        "AM": ["TJAM", "TRF1", "TRT11"],
+        "MA": ["TJMA", "TRF1", "TRT16"],
+        "PI": ["TJPI", "TRF1", "TRT22"],
+        "RN": ["TJRN", "TRF5", "TRT21"],
+        "PB": ["TJPB", "TRF5", "TRT13"],
+        "AL": ["TJAL", "TRF5", "TRT19"],
+        "SE": ["TJSE", "TRF5", "TRT20"],
+        "TO": ["TJTO", "TRF1", "TRT10"],
+        "RO": ["TJRO", "TRF1", "TRT14"],
+        "AC": ["TJAC", "TRF1", "TRT14"],
+        "AP": ["TJAP", "TRF1", "TRT8"],
+        "RR": ["TJRR", "TRF1", "TRT11"],
+        "ES": ["TJES", "TRF2", "TRT17"],
+        "DF": ["TJDF", "TRF1", "TRT10"],
+    }
+
+    # Define quais tribunais consultar
+    # Sempre: TRF1 (nacional), TST (nacional) + tribunais da UF
+    tribunais_uf = UF_TRIBUNAIS.get(uf.upper(), []) if uf else []
+    tribunais_base = ["TRF1", "TST"]
+    tribunais_consultar = list(dict.fromkeys(tribunais_uf + tribunais_base))
+
+    # Acumuladores
+    total = 0
+    polo_passivo = 0
+    polo_ativo = 0
+    exec_fiscal = 0
+    exec_trab = 0
+    rj = False
+    falencia = False
+    valor_total = 0.0
+    processos_ativos = 0
+    detalhes = []
+    tribunais_com_resultado = []
+
+    cnpj_limpo = re.sub(r"\D", "", cnpj)
+
+    # Classes processuais críticas
+    CLASSES_RJ = ["recuperação judicial", "recuperacao judicial", "sobrepartilha"]
+    CLASSES_FALENCIA = ["falência", "falencia", "concordata"]
+    CLASSES_EXEC_FISCAL = ["execução fiscal", "execucao fiscal", "embargos à execução fiscal"]
+    CLASSES_TRAB = ["reclamação trabalhista", "reclamacao trabalhista",
+                    "ação trabalhista", "dissídio"]
+
+    for nome_trib, idx in [(t, TRIBUNAIS[t]) for t in tribunais_consultar if t in TRIBUNAIS]:
         try:
-            should = [{"match":{"numeroProcesso":cnpj}}]
-            if razao: should.append({"match_phrase":{"partes.nome":razao}})
-            r = requests.post(f"https://api-publica.datajud.cnj.jus.br/{idx}/_search",
-                json={"query":{"bool":{"should":should}},"size":30},
-                headers={**HEADERS,"Authorization":api_key,"Content-Type":"application/json"},
-                timeout=12)
-            if r.status_code == 200:
-                hits = r.json().get("hits",{})
-                t = hits.get("total",{}).get("value",0); total += t
-                itens = hits.get("hits",[])
-                exec_ += sum(1 for h in itens if "execu" in str(h.get("_source",{}).get("classeProcessual","")).lower())
-                if any("recupera" in str(h.get("_source",{})).lower() for h in itens): rj = True
+            # Query: busca CNPJ em partes (polo ativo e passivo)
+            query = {
+                "query": {
+                    "bool": {
+                        "should": [
+                            {"match": {"numeroProcesso": cnpj_limpo}},
+                            {"match": {"partes.documento": cnpj_limpo}},
+                        ],
+                        "minimum_should_match": 1
+                    }
+                },
+                "size": 50,
+                "_source": [
+                    "numeroProcesso", "classeProcessual", "assuntos",
+                    "partes", "valorCausa", "dataAjuizamento",
+                    "movimentos", "situacao", "orgaoJulgador"
+                ]
+            }
+
+            r = requests.post(
+                f"https://api-publica.datajud.cnj.jus.br/{idx}/_search",
+                json=query,
+                headers=headers_dj,
+                timeout=10
+            )
+
+            if r.status_code != 200:
+                continue
+
+            hits = r.json().get("hits", {})
+            t_tribunal = hits.get("total", {}).get("value", 0)
+            if t_tribunal == 0:
+                continue
+
+            total += t_tribunal
+            tribunais_com_resultado.append(nome_trib)
+            itens = hits.get("hits", [])
+
+            for h in itens:
+                src = h.get("_source", {})
+                classe = str(src.get("classeProcessual", {}).get("nome", "") if isinstance(src.get("classeProcessual"), dict) else src.get("classeProcessual", "")).lower()
+                situacao = str(src.get("situacao", "")).lower()
+                valor = src.get("valorCausa", {})
+                if isinstance(valor, dict):
+                    v = float(valor.get("valor", 0) or 0)
+                elif isinstance(valor, (int, float)):
+                    v = float(valor)
+                else:
+                    v = 0.0
+                valor_total += v
+
+                # Polo ativo/passivo
+                partes = src.get("partes", []) or []
+                for parte in partes:
+                    doc = str(parte.get("documento", "") or "")
+                    polo = str(parte.get("polo", "") or "").upper()
+                    if cnpj_limpo in doc.replace(".", "").replace("/", "").replace("-", ""):
+                        if polo in ("P", "PASSIVO", "RÉU", "REU", "EXECUTADO"):
+                            polo_passivo += 1
+                        elif polo in ("A", "ATIVO", "AUTOR", "EXEQUENTE"):
+                            polo_ativo += 1
+
+                # Situação
+                if situacao in ("ativo", "em andamento", "em tramitação"):
+                    processos_ativos += 1
+
+                # Classificação
+                if any(c in classe for c in CLASSES_RJ):
+                    rj = True
+                if any(c in classe for c in CLASSES_FALENCIA):
+                    falencia = True
+                if any(c in classe for c in CLASSES_EXEC_FISCAL):
+                    exec_fiscal += 1
+                if any(c in classe for c in CLASSES_TRAB):
+                    exec_trab += 1
+
+                # Detalhe
+                if v > 0 or rj or falencia or exec_fiscal:
+                    num = src.get("numeroProcesso", "")
+                    detalhes.append({
+                        "tribunal": nome_trib,
+                        "numero": num,
+                        "classe": classe,
+                        "valor": v,
+                        "situacao": situacao,
+                    })
+
         except Exception:
             continue
-    pts = -45 if rj else (-12 if exec_>=10 else -5 if exec_>0 else 3)
-    if total >= 50: pts -= 8
-    resumo = f"{total} processo(s) | Execuções: {exec_}"
-    if rj: resumo = "⚠ RECUPERAÇÃO JUDICIAL | " + resumo
-    return fonte_ok("DataJud / CNJ – Processos Judiciais",
-        "confirmacao" if total>0 else "ausencia", resumo,"",pts,
-        {"total":total,"execucoes":exec_,"rj":rj})
+
+    # Score
+    if rj or falencia:
+        pts = -45
+    elif exec_fiscal >= 5 or polo_passivo >= 20:
+        pts = -15
+    elif exec_fiscal >= 1 or polo_passivo >= 5:
+        pts = -8
+    elif total >= 10:
+        pts = -4
+    elif total > 0:
+        pts = -2
+    else:
+        pts = 3
+
+    if valor_total > 1_000_000:
+        pts -= 5
+    elif valor_total > 500_000:
+        pts -= 3
+
+    # Resumo
+    resumo_partes = []
+    if rj:
+        resumo_partes.append("⚠ RECUPERAÇÃO JUDICIAL DETECTADA")
+    if falencia:
+        resumo_partes.append("⚠ FALÊNCIA DETECTADA")
+    resumo_partes.append(f"{total} processo(s)")
+    if tribunais_com_resultado:
+        resumo_partes.append(f"Tribunais: {', '.join(tribunais_com_resultado)}")
+    if polo_passivo:
+        resumo_partes.append(f"Polo passivo: {polo_passivo}")
+    if polo_ativo:
+        resumo_partes.append(f"Polo ativo: {polo_ativo}")
+    if exec_fiscal:
+        resumo_partes.append(f"Exec. fiscal: {exec_fiscal}")
+    if exec_trab:
+        resumo_partes.append(f"Trabalhistas: {exec_trab}")
+    if valor_total > 0:
+        resumo_partes.append(f"Valor total: R$ {valor_total:,.0f}")
+
+    resumo = " | ".join(resumo_partes)
+    detalhe = f"Processos ativos: {processos_ativos} | Tribunais consultados: {len(tribunais_consultar)}"
+
+    return fonte_ok(
+        "DataJud / CNJ – Processos Judiciais",
+        "confirmacao" if total > 0 else "ausencia",
+        resumo, detalhe, pts,
+        {
+            "total": total,
+            "polo_passivo": polo_passivo,
+            "polo_ativo": polo_ativo,
+            "exec_fiscal": exec_fiscal,
+            "exec_trabalhista": exec_trab,
+            "rj": rj,
+            "falencia": falencia,
+            "valor_total": valor_total,
+            "processos_ativos": processos_ativos,
+            "tribunais_com_resultado": tribunais_com_resultado,
+            "detalhes": detalhes[:10],
+        }
+    )
 
 def consultar_noticias(razao):
     try:
@@ -926,7 +1183,7 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     fontes = [
         rec,
         consultar_ceis(cnpj),
-        consultar_datajud(cnpj, razao),
+        consultar_datajud(cnpj, razao, uf_real),
         consultar_noticias(razao),
         classificar_setor(cnae),
     ]
