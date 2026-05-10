@@ -5,7 +5,8 @@ Tudo em um arquivo. Sem imports externos que quebram.
 Fluxo: CNPJ + PDF → extrai texto → analisa → score → JSON + PDF base64
 """
 from __future__ import annotations
-import base64, datetime as dt, io, json, os, re, traceback
+import base64, io, json, os, re, traceback
+import datetime as dt
 from typing import Optional
 import requests
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -1053,8 +1054,8 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
 
     cad = Table([
         [Paragraph(f"CNPJ: <b>{cnpj[:2]}.{cnpj[2:5]}.{cnpj[5:8]}/{cnpj[8:12]}-{cnpj[12:]}</b>", ps("c1")),
-         Paragraph(f"Data-base: <b>{datetime.date.today().strftime('%d/%m/%Y')}</b>", ps("c1")),
-         Paragraph(f"Gerado em: <b>{datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}</b>", ps("c1"))],
+         Paragraph(f"Data-base: <b>{dt.date.today().strftime('%d/%m/%Y')}</b>", ps("c1")),
+         Paragraph(f"Gerado em: <b>{dt.datetime.now().strftime('%d/%m/%Y %H:%M')}</b>", ps("c1"))],
     ], colWidths=[W*0.35, W*0.32, W*0.33])
     cad.setStyle(TableStyle([
         ("FONTSIZE",(0,0),(-1,-1),8), ("PADDING",(0,0),(-1,-1),3),
@@ -1448,7 +1449,7 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
     els.append(Spacer(1,10))
     els.append(HRFlowable(width="100%", thickness=1, color=GOLD))
     els.append(Paragraph(
-        f"{ASSINATURA} | {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | CONFIDENCIAL",
+        f"{ASSINATURA} | {dt.datetime.now().strftime('%d/%m/%Y %H:%M')} | CONFIDENCIAL",
         ps("rod", fontName="Helvetica-Bold", fontSize=7, textColor=NAVY, alignment=TA_CENTER)
     ))
 
