@@ -5,7 +5,7 @@ Tudo em um arquivo. Sem imports externos que quebram.
 Fluxo: CNPJ + PDF → extrai texto → analisa → score → JSON + PDF base64
 """
 from __future__ import annotations
-import base64, datetime as dt, io, json, os, re, traceback
+import base64, datetime as dt, datetime, io, json, os, re, traceback
 from typing import Optional
 import requests
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
