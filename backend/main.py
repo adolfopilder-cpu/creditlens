@@ -19,7 +19,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
-
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 try:
     import pdfplumber
     HAS_PDFPLUMBER = True
