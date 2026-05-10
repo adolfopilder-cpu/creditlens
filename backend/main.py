@@ -266,8 +266,27 @@ def analisar_balanco(texto: str, nome: str = "") -> dict:
             pass
     if not liq_corrente and ativo_circ and passivo_circ and passivo_circ > 0:
         liq_corrente = round(ativo_circ / passivo_circ, 2)
-    liq_geral = extrair_valor(texto, r"liquidez geral", r"geral\b.*\d")
-    liq_seca = extrair_valor(texto, r"liquidez seca", r"seca\b.*\d")
+    # Liquidez Geral — linha: "Geral 1,59 1,73 1,57 1,25 BOM" → pega 3o valor (2024)
+    m_lg = re.search(r"^Geral\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)",
+                     texto, re.IGNORECASE | re.MULTILINE)
+    liq_geral = None
+    if m_lg:
+        try:
+            v = float(m_lg.group(3).replace(",", "."))
+            liq_geral = v if v < 20 else None
+        except Exception:
+            pass
+
+    # Liquidez Seca — linha: "Seca 0,90 0,91 0,81 0,86 SATISFATÓRIO" → 3o valor (2024)
+    m_ls = re.search(r"^Seca\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)",
+                     texto, re.IGNORECASE | re.MULTILINE)
+    liq_seca = None
+    if m_ls:
+        try:
+            v = float(m_ls.group(3).replace(",", "."))
+            liq_seca = v if v < 20 else None
+        except Exception:
+            pass
     pmr = extrair_valor(texto, r"prazo m[eé]dio.*receb", r"pmr\b")
     pmp = extrair_valor(texto, r"prazo m[eé]dio.*pag", r"pmp\b")
     pmre = extrair_valor(texto, r"prazo m[eé]dio.*estoque|pmre\b")
@@ -1076,8 +1095,11 @@ def consultar_datajud(cnpj, razao="", uf=""):
     if valor_total > 0:
         resumo_partes.append(f"Valor total: R$ {valor_total:,.0f}")
 
-    resumo = " | ".join(resumo_partes)
-    detalhe = f"Processos ativos: {processos_ativos} | Tribunais consultados: {len(tribunais_consultar)}"
+    if not resumo_partes or (len(resumo_partes) == 1 and "processo(s)" in resumo_partes[0]):
+        resumo = f"0 processo(s) | Execuções: 0 | Trabalhistas: 0 | Tribunais: {', '.join(tribunais_consultar[:4])}"
+    else:
+        resumo = " | ".join(resumo_partes)
+    detalhe = f"Processos ativos: {processos_ativos} | Tribunais consultados: {len(tribunais_consultar)} ({', '.join(tribunais_consultar)})"
 
     return fonte_ok(
         "DataJud / CNJ – Processos Judiciais",
