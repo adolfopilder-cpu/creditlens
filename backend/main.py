@@ -2134,6 +2134,18 @@ def gerar_pdf_bytes(resultado: dict) -> bytes:
 def root():
     return {"status":"ok","app":ASSINATURA,"version":"5.0.0"}
 
+@app.get("/debug-env")
+def debug_env():
+    """Diagnóstico temporário — remover após resolver."""
+    key = PORTAL_KEY or ""
+    return {
+        "portal_key_length": len(key),
+        "portal_key_start": key[:4] if key else "VAZIO",
+        "portal_key_end": key[-4:] if len(key) > 4 else "CURTO",
+        "portal_key_has_spaces": " " in key,
+        "worker_url": WORKER_URL[:30] if WORKER_URL else "VAZIO",
+    }
+
 @app.get("/health")
 def health():
     return {"status":"healthy","timestamp":dt.datetime.now().isoformat(),
