@@ -36,8 +36,7 @@ except ImportError:
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
-PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "834457610509b5fa63084f290d928f7c")
-
+PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "")
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
 
@@ -845,6 +844,9 @@ def consultar_receita(cnpj):
     return fonte_ok("Receita Federal / Cadastro CNPJ","erro","Falha na consulta",pontos=-8)
 
 def consultar_ceis(cnpj):
+    if not PORTAL_KEY:
+        return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
+            "Chave Portal Transparência não configurada","",-2)
     try:
         # CEIS
         r = requests.get(
@@ -852,26 +854,58 @@ def consultar_ceis(cnpj):
             headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
         if r.status_code == 200:
             dados = r.json()
-            if isinstance(dados,list) and dados:
-                return fonte_ok("CEIS/CNEP – Sanções","confirmacao",
-                    f"⚠ LISTADA NO CEIS: {len(dados)} sanção(ões)","",-25)
+            if isinstance(dados, list) and dados:
+                # Extrai detalhes das sanções
+                sancoes = []
+                for s in dados[:5]:  # primeiras 5
+                    orgao = s.get("orgaoSancionador",{}).get("nome","") if isinstance(s.get("orgaoSancionador"),dict) else str(s.get("orgaoSancionador",""))
+                    tipo = s.get("tipoSancao",{}).get("descricaoResumida","") if isinstance(s.get("tipoSancao"),dict) else str(s.get("tipoSancao",""))
+                    inicio = s.get("dataInicioSancao","")[:10] if s.get("dataInicioSancao") else ""
+                    fim = s.get("dataFimSancao","")[:10] if s.get("dataFimSancao") else "vigente"
+                    valor = s.get("valorMulta", 0) or 0
+                    sancoes.append({
+                        "tipo": tipo[:50],
+                        "orgao": orgao[:60],
+                        "inicio": inicio,
+                        "fim": fim,
+                        "valor_multa": valor,
+                    })
+                detalhe = " | ".join([f"{s['tipo']} ({s['orgao']}) {s['inicio']}→{s['fim']}" for s in sancoes[:3]])
+                resultado = fonte_ok("CEIS/CNEP – Sanções","confirmacao",
+                    f"⚠ LISTADA NO CEIS: {len(dados)} sanção(ões)", detalhe, -25)
+                resultado["sancoes_detalhes"] = sancoes
+                resultado["total_sancoes"] = len(dados)
+                return resultado
+
             # Consulta CNEP também
             r2 = requests.get(
                 f"https://api.portaldatransparencia.gov.br/api-de-dados/cnep?cnpjSancionado={cnpj}&pagina=1",
                 headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
             if r2.status_code == 200:
                 dados2 = r2.json()
-                if isinstance(dados2,list) and dados2:
-                    return fonte_ok("CEIS/CNEP – Sanções","confirmacao",
-                        f"⚠ LISTADA NO CNEP: {len(dados2)} punição(ões)","",-25)
+                if isinstance(dados2, list) and dados2:
+                    sancoes2 = []
+                    for s in dados2[:5]:
+                        orgao = s.get("orgaoSancionador",{}).get("nome","") if isinstance(s.get("orgaoSancionador"),dict) else ""
+                        tipo = s.get("tipoSancao",{}).get("descricaoResumida","") if isinstance(s.get("tipoSancao"),dict) else ""
+                        inicio = s.get("dataInicioSancao","")[:10] if s.get("dataInicioSancao") else ""
+                        fim = s.get("dataFimSancao","")[:10] if s.get("dataFimSancao") else "vigente"
+                        sancoes2.append({"tipo": tipo, "orgao": orgao, "inicio": inicio, "fim": fim})
+                    resultado2 = fonte_ok("CEIS/CNEP – Sanções","confirmacao",
+                        f"⚠ LISTADA NO CNEP: {len(dados2)} punição(ões)", "", -25)
+                    resultado2["sancoes_detalhes"] = sancoes2
+                    resultado2["total_sancoes"] = len(dados2)
+                    return resultado2
+
             return fonte_ok("CEIS/CNEP – Sanções","ausencia",
                 "Sem registros de sanções no CEIS/CNEP","",3)
+
         elif r.status_code == 401:
             return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
                 "Chave API inválida — verificar PORTAL_TRANSPARENCIA_KEY","",-2)
         elif r.status_code == 429:
             return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
-                "Rate limit atingido — tentar novamente em instantes","",-2)
+                "Rate limit atingido — tentar novamente","",-2)
         else:
             return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
                 f"HTTP {r.status_code} — indisponível","",-2)
