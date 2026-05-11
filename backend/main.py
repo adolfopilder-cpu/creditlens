@@ -2156,6 +2156,19 @@ async def analisar_completo(
             nome_cisp = cisp.filename or ""
             texto_cisp = extrair_texto_arquivo(b, nome_cisp)
 
+        texto_cnd = nome_cnd = ""
+        texto_crf = nome_crf = ""
+
+        if cnd:
+            b = await cnd.read()
+            nome_cnd = cnd.filename or ""
+            texto_cnd = extrair_texto_arquivo(b, nome_cnd)
+
+        if crf:
+            b = await crf.read()
+            nome_crf = crf.filename or ""
+            texto_crf = extrair_texto_arquivo(b, nome_crf)
+
         # Pega UF da Receita para chamar o worker correto
         rec_tmp = consultar_receita(limpar_cnpj(cnpj))
         uf_empresa = rec_tmp.get("uf", "SP") if rec_tmp else "SP"
