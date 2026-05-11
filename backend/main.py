@@ -2159,10 +2159,9 @@ async def analisar_completo(
         texto_cnd = nome_cnd = ""
         texto_crf = nome_crf = ""
 
-        if cnd:
-            b = await cnd.read()
-            nome_cnd = cnd.filename or ""
-            texto_cnd = extrair_texto_arquivo(b, nome_cnd)
+       if cnd_file:
+            b = await cnd_file.read()
+            nome_cnd = cnd_file.filename or ""
 
         if crf:
             b = await crf.read()
