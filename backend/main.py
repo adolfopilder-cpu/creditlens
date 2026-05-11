@@ -2173,11 +2173,12 @@ async def analisar_completo(
         rec_tmp = consultar_receita(limpar_cnpj(cnpj))
         uf_empresa = rec_tmp.get("uf", "SP") if rec_tmp else "SP"
 
+      texto_cnd = nome_cnd = texto_crf = nome_crf = ""
         resultado = analisar_cnpj(
             limpar_cnpj(cnpj), texto_bal, nome_bal, texto_cisp, nome_cisp,
             texto_cnd, nome_cnd, texto_crf, nome_crf,
             uf=uf_empresa
-        )
+                )
 
         # Gera PDF com os mesmos dados — inclui balanço e CISP
         try:
