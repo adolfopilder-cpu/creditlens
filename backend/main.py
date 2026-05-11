@@ -1048,11 +1048,22 @@ def consultar_ceis(cnpj):
 
                     inicio = s.get("dataInicioSancao","")[:10] if s.get("dataInicioSancao") else ""
                     fim = s.get("dataFimSancao","")[:10] if s.get("dataFimSancao") else ""
-                    valor_multa = float(s.get("valorMulta") or 0)
+                    # Tenta múltiplos campos para o valor da multa
+                    valor_multa = 0.0
+                    for campo_multa in ["valorMulta", "valor", "multa", "valorSancao"]:
+                        v = s.get(campo_multa)
+                        if v:
+                            try:
+                                valor_multa = float(str(v).replace(",",".").replace("R$","").strip())
+                                break
+                            except Exception:
+                                pass
                     valor_total_multas += valor_multa
                     fundamentacao = s.get("fundamentacaoLegal","")[:100] if s.get("fundamentacaoLegal") else ""
                     publicacao = s.get("dataPublicacaoDou","")[:10] if s.get("dataPublicacaoDou") else ""
-                    processo = s.get("numeroProcesso","") or ""
+                    processo = s.get("numeroProcesso","") or s.get("processo","") or ""
+                    # Log dos campos disponíveis (para debug)
+                    campos_disponíveis = list(s.keys())
 
                     # Verifica se está vigente
                     vigente = not fim or fim >= dt.date.today().isoformat()
@@ -2284,21 +2295,35 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
             ps("sr", fontName="Helvetica-Bold", fontSize=9, textColor=RED)))
         els.append(Spacer(1,6))
 
-        # Tabela de sanções
-        rows = [["Tipo","Órgão Sancionador","Início","Fim","Multa (R$)","Vigente"]]
-        for s in sancoes_lista[:15]:  # max 15 no PDF
+        # Filtra apenas vigentes para exibição no PDF
+        sancoes_vigentes_lista = [s for s in sancoes_lista if s.get("vigente")]
+        sancoes_exibir = sancoes_vigentes_lista if sancoes_vigentes_lista else sancoes_lista
+        total_exibir = len(sancoes_exibir)
+
+        if sancoes_vigentes_lista:
+            els.append(Paragraph(
+                f"Exibindo apenas sanções VIGENTES ({len(sancoes_vigentes_lista)} de {total_s} total)",
+                ps("sv2", fontName="Helvetica-Bold", fontSize=8, textColor=RED)))
+            els.append(Spacer(1,4))
+
+        # Tabela de sanções vigentes
+        rows = [["Tipo","Órgão Sancionador","Início","Fim","Multa (R$)"]]
+        for s in sancoes_exibir[:20]:  # max 20 vigentes
+            multa = s.get("valor_multa", 0) or 0
             rows.append([
-                Paragraph(s.get("tipo","")[:45], ps("sc", fontSize=6)),
-                Paragraph(s.get("orgao","")[:45], ps("so", fontSize=6)),
+                Paragraph(s.get("tipo","")[:50], ps("sc", fontSize=6)),
+                Paragraph(s.get("orgao","")[:50], ps("so", fontSize=6)),
                 s.get("inicio","")[:10],
                 s.get("fim","")[:10],
-                f"{s.get('valor_multa',0):,.0f}" if s.get("valor_multa",0) > 0 else "—",
-                Paragraph("SIM" if s.get("vigente") else "não",
-                    ps("sv", fontSize=6, fontName="Helvetica-Bold",
-                        textColor=RED if s.get("vigente") else MUTED)),
+                Paragraph(
+                    f"R$ {multa:,.2f}" if multa > 0 else "—",
+                    ps("sm", fontSize=6,
+                        textColor=RED if multa > 0 else MUTED,
+                        fontName="Helvetica-Bold" if multa > 0 else "Helvetica")
+                ),
             ])
 
-        tc = Table(rows, colWidths=[4.5*cm, 4.5*cm, 2*cm, 2*cm, 2.5*cm, 1.5*cm])
+        tc = Table(rows, colWidths=[5*cm, 5*cm, 2*cm, 2*cm, 3*cm])
         tc.setStyle(TableStyle([
             ("BACKGROUND",(0,0),(-1,0),RED),
             ("TEXTCOLOR",(0,0),(-1,0),WHITE),
@@ -2307,14 +2332,25 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
             ("GRID",(0,0),(-1,-1),0.3,BORD),
             ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
             ("PADDING",(0,0),(-1,-1),3),
-            ("ALIGN",(2,0),(5,-1),"CENTER"),
+            ("ALIGN",(2,0),(4,-1),"CENTER"),
         ]))
         els.append(tc)
-        els.append(Spacer(1,6))
+        els.append(Spacer(1,4))
 
-        if total_s > 15:
+        # Valor total das multas
+        valor_total = fonte_ceis.get("valor_total_multas", 0)
+        if valor_total > 0:
             els.append(Paragraph(
-                f"* Exibindo 15 de {total_s} sanções. Consultar lista completa em portaldatransparencia.gov.br",
+                f"Total de multas: R$ {valor_total:,.2f}",
+                ps("vt", fontName="Helvetica-Bold", fontSize=8, textColor=RED)))
+        else:
+            els.append(Paragraph(
+                "Valores de multa não informados nos registros do CEIS — consultar processo administrativo",
+                ps("vt2", fontSize=7, textColor=MUTED)))
+
+        if total_exibir > 20:
+            els.append(Paragraph(
+                f"* Exibindo 20 de {total_exibir} sanções vigentes. Lista completa em portaldatransparencia.gov.br",
                 ps("sn", fontSize=7, textColor=MUTED)))
         els.append(Spacer(1,8))
 
