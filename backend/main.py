@@ -36,6 +36,7 @@ except ImportError:
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
+PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "demo")
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
 
@@ -846,7 +847,7 @@ def consultar_ceis(cnpj):
     try:
         r = requests.get(
             f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj}&pagina=1",
-            headers={**HEADERS,"chave-api-dados":"demo"}, timeout=TIMEOUT)
+            headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
         if r.status_code == 200:
             dados = r.json()
             if isinstance(dados,list) and dados:
