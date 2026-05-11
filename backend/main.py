@@ -984,10 +984,13 @@ def consultar_ceis(cnpj):
     if not PORTAL_KEY:
         return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
             "Chave Portal Transparência não configurada","",-2)
+    # Formata CNPJ corretamente: XX.XXX.XXX/XXXX-XX
+    c = re.sub(r"\D", "", cnpj)
+    cnpj_fmt = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}" if len(c) == 14 else cnpj
     try:
-        # CEIS
+        # CEIS — usa CNPJ formatado
         r = requests.get(
-            f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj}&pagina=1",
+            f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj_fmt}&pagina=1",
             headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
         if r.status_code == 200:
             dados = r.json()
@@ -1013,7 +1016,7 @@ def consultar_ceis(cnpj):
                 while len(todos_dados) < 50:  # limite 50
                     try:
                         r_extra = requests.get(
-                            f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj}&pagina={pagina}",
+                            f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj_fmt}&pagina={pagina}",
                             headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
                         if r_extra.status_code == 200:
                             extra = r_extra.json()
@@ -1115,7 +1118,7 @@ def consultar_ceis(cnpj):
 
             # Consulta CNEP também
             r2 = requests.get(
-                f"https://api.portaldatransparencia.gov.br/api-de-dados/cnep?cnpjSancionado={cnpj}&pagina=1",
+                f"https://api.portaldatransparencia.gov.br/api-de-dados/cnep?cnpjSancionado={cnpj_fmt}&pagina=1",
                 headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
             if r2.status_code == 200:
                 dados2 = r2.json()
