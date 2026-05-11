@@ -110,7 +110,7 @@ function FonteRow({ fonte, idx }) {
   );
 }
 
-async function baixarPDFdoResultado(resultado, balanco, cisp, cnpj) {
+async function baixarPDFdoResultado(resultado, balanco, cisp, cnpj, cnd, crf) {
   // Reenvia ao backend e recebe o PDF como blob diretamente
   const form = new FormData();
   form.append("cnpj", cnpj);
@@ -147,6 +147,8 @@ export default function AnalisePage() {
   const [pdfErro, setPdfErro] = useState("");
   const [balanco, setBalanco] = useState(null);
   const [cisp, setCisp] = useState(null);
+  const [cnd, setCnd] = useState(null);
+  const [crf, setCrf] = useState(null);
   const [filtroFonte, setFiltroFonte] = useState("todas");
   const [buscaFonte, setBuscaFonte] = useState("");
 
@@ -162,6 +164,8 @@ export default function AnalisePage() {
       form.append("cnpj", cnpj);
       if (balanco) form.append("balanco", balanco);
       if (cisp) form.append("cisp", cisp);
+      if (cnd) form.append("cnd", cnd);
+      if (crf) form.append("crf", crf);
 
       // Tenta endpoint completo primeiro
       let res = await fetch(`${API}/api/analisar-completo`, {
@@ -265,8 +269,8 @@ export default function AnalisePage() {
           </div>
 
           {/* Anexos */}
-          <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
-            <div style={{ flex:1, minWidth:200 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div>
               <div style={{ fontSize:11, color:MUTED, fontWeight:600,
                 textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
                 📊 Balanço / DRE (opcional)
@@ -281,7 +285,7 @@ export default function AnalisePage() {
                 {balanco ? `✓ ${balanco.name}` : "Clique para anexar Balanço ou DRE"}
               </label>
             </div>
-            <div style={{ flex:1, minWidth:200 }}>
+            <div>
               <div style={{ fontSize:11, color:MUTED, fontWeight:600,
                 textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
                 📋 Ficha CISP / Credinfar (opcional)
@@ -296,14 +300,48 @@ export default function AnalisePage() {
                 {cisp ? `✓ ${cisp.name}` : "Clique para anexar Ficha CISP / Credinfar"}
               </label>
             </div>
+            <div>
+              <div style={{ fontSize:11, color:MUTED, fontWeight:600,
+                textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
+                📄 CND — Certidão Receita/PGFN (opcional)
+              </div>
+              <label style={{ display:"block", background:BG,
+                border:`2px dashed ${cnd?GOLD:BORDER}`,
+                borderRadius:8, padding:"10px 14px", cursor:"pointer",
+                fontSize:13, color:cnd?GOLD:MUTED }}>
+                <input type="file" accept=".pdf"
+                  onChange={e=>setCnd(e.target.files?.[0]||null)}
+                  style={{ display:"none" }} />
+                {cnd ? `✓ ${cnd.name}` : "Clique para anexar CND Receita/PGFN"}
+              </label>
+            </div>
+            <div>
+              <div style={{ fontSize:11, color:MUTED, fontWeight:600,
+                textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>
+                📄 CRF/FGTS — Caixa Econômica (opcional)
+              </div>
+              <label style={{ display:"block", background:BG,
+                border:`2px dashed ${crf?GOLD:BORDER}`,
+                borderRadius:8, padding:"10px 14px", cursor:"pointer",
+                fontSize:13, color:crf?GOLD:MUTED }}>
+                <input type="file" accept=".pdf"
+                  onChange={e=>setCrf(e.target.files?.[0]||null)}
+                  style={{ display:"none" }} />
+                {crf ? `✓ ${crf.name}` : "Clique para anexar CRF/FGTS"}
+              </label>
+            </div>
           </div>
 
           {/* Indicador de arquivos carregados */}
-          {(balanco || cisp) && (
+          {(balanco || cisp || cnd || crf) && (
             <div style={{ background:"#edfaf5", border:"1px solid #a7f3d0",
               borderRadius:8, padding:"8px 14px", fontSize:12, color:"#0e7a5a" }}>
-              ✓ {[balanco&&`Balanço: ${balanco.name}`, cisp&&`CISP: ${cisp.name}`].filter(Boolean).join(" | ")}
-              {" "}— serão analisados e incluídos no relatório
+              ✓ {[
+                balanco && `Balanço: ${balanco.name}`,
+                cisp && `CISP: ${cisp.name}`,
+                cnd && `CND: ${cnd.name}`,
+                crf && `CRF: ${crf.name}`,
+              ].filter(Boolean).join(" | ")} — serão analisados e incluídos no relatório
             </div>
           )}
         </form>
@@ -352,6 +390,59 @@ export default function AnalisePage() {
                   {r.balanco_detalhado?.disponivel ? " · 📊 Balanço analisado" : ""}
                   {r.cisp_detalhado?.disponivel ? " · 📋 CISP analisada" : ""}
                 </div>
+
+                {/* ── Sócios e Grupo Econômico ── */}
+                {r.grupo_economico && (
+                  <div style={{ marginTop:10, padding:"10px 12px",
+                    background:"#f0f4ff", borderRadius:8,
+                    border:"1px solid #c7d2fe", fontSize:11 }}>
+
+                    {/* Sócios */}
+                    {r.socios_360?.socios && Object.keys(r.socios_360.socios).length > 0 && (
+                      <div style={{ marginBottom:8 }}>
+                        <div style={{ fontWeight:700, color:NAVY, marginBottom:4, fontSize:11 }}>
+                          👥 QUADRO SOCIETÁRIO
+                        </div>
+                        {Object.entries(r.socios_360.socios).map(([nome, info]) => (
+                          <div key={nome} style={{ display:"flex", justifyContent:"space-between",
+                            padding:"3px 0", borderBottom:"1px solid #e0e7ff", gap:8 }}>
+                            <span style={{ fontWeight:600, color:"#1e3a5f" }}>{nome}</span>
+                            <span style={{ color:MUTED }}>{info.qualificacao}</span>
+                            {info.alertas?.length > 0 && (
+                              <span style={{ color:"#c0392b", fontWeight:700 }}>⚠ ALERTA</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Grupo Econômico */}
+                    {r.grupo_economico?.total > 1 && (
+                      <div>
+                        <div style={{ fontWeight:700, color:NAVY, marginBottom:4, fontSize:11 }}>
+                          🏢 GRUPO ECONÔMICO — {r.grupo_economico.total} estabelecimentos
+                        </div>
+                        {r.grupo_economico.filiais?.map(f => (
+                          <div key={f.cnpj} style={{ display:"flex", gap:8,
+                            padding:"3px 0", borderBottom:"1px solid #e0e7ff",
+                            fontSize:10, color:MUTED }}>
+                            <span style={{ fontFamily:"monospace", color:NAVY }}>
+                              {f.cnpj?.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/,"$1.$2.$3/$4-$5")}
+                            </span>
+                            <span>{f.municipio}/{f.uf}</span>
+                            <span style={{ color:f.situacao==="ATIVA"?"#0e7a5a":"#c0392b",
+                              fontWeight:700 }}>{f.situacao}</span>
+                          </div>
+                        ))}
+                        {r.grupo_economico?.alerta_grupo && (
+                          <div style={{ marginTop:4, color:"#b45309", fontWeight:700 }}>
+                            ⚠ Cross-default: {Object.keys(r.grupo_economico.cross_default||{}).length} sócio(s) em múltiplos CNPJs
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:10 }}>
                 <ScoreGauge score={r.score} />
