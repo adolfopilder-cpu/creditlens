@@ -36,7 +36,9 @@ except ImportError:
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
-PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "").strip()
+PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "483f209f1d3074d582f88d16acb33b27
+
+").strip()
 OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
@@ -1007,11 +1009,99 @@ def consultar_ceis(cnpj):
                         "fim": fim,
                         "valor_multa": valor,
                     })
-                detalhe = " | ".join([f"{s['tipo']} ({s['orgao']}) {s['inicio']}→{s['fim']}" for s in sancoes[:3]])
-                resultado = fonte_ok("CEIS/CNEP – Sanções","confirmacao",
-                    f"⚠ LISTADA NO CEIS: {len(dados)} sanção(ões)", detalhe, -25)
-                resultado["sancoes_detalhes"] = sancoes
-                resultado["total_sancoes"] = len(dados)
+                # Busca páginas adicionais se houver mais de 10 sanções
+                todos_dados = list(dados)
+                pagina = 2
+                while len(todos_dados) < 50:  # limite 50
+                    try:
+                        r_extra = requests.get(
+                            f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj}&pagina={pagina}",
+                            headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
+                        if r_extra.status_code == 200:
+                            extra = r_extra.json()
+                            if not extra:
+                                break
+                            todos_dados.extend(extra)
+                            pagina += 1
+                        else:
+                            break
+                    except Exception:
+                        break
+
+                # Extrai detalhes completos
+                sancoes_completas = []
+                valor_total_multas = 0.0
+                orgaos = set()
+                tipos = set()
+                sancoes_vigentes = 0
+
+                for s in todos_dados:
+                    orgao = ""
+                    if isinstance(s.get("orgaoSancionador"), dict):
+                        orgao = s["orgaoSancionador"].get("nome","")
+                    elif s.get("orgaoSancionador"):
+                        orgao = str(s["orgaoSancionador"])
+
+                    tipo = ""
+                    if isinstance(s.get("tipoSancao"), dict):
+                        tipo = s["tipoSancao"].get("descricaoResumida","") or s["tipoSancao"].get("descricao","")
+                    elif s.get("tipoSancao"):
+                        tipo = str(s["tipoSancao"])
+
+                    inicio = s.get("dataInicioSancao","")[:10] if s.get("dataInicioSancao") else ""
+                    fim = s.get("dataFimSancao","")[:10] if s.get("dataFimSancao") else ""
+                    valor_multa = float(s.get("valorMulta") or 0)
+                    valor_total_multas += valor_multa
+                    fundamentacao = s.get("fundamentacaoLegal","")[:100] if s.get("fundamentacaoLegal") else ""
+                    publicacao = s.get("dataPublicacaoDou","")[:10] if s.get("dataPublicacaoDou") else ""
+                    processo = s.get("numeroProcesso","") or ""
+
+                    # Verifica se está vigente
+                    vigente = not fim or fim >= dt.date.today().isoformat()
+                    if vigente:
+                        sancoes_vigentes += 1
+
+                    if orgao:
+                        orgaos.add(orgao[:50])
+                    if tipo:
+                        tipos.add(tipo[:50])
+
+                    sancoes_completas.append({
+                        "tipo": tipo[:80],
+                        "orgao": orgao[:80],
+                        "inicio": inicio,
+                        "fim": fim or "vigente",
+                        "valor_multa": valor_multa,
+                        "fundamentacao": fundamentacao,
+                        "publicacao_dou": publicacao,
+                        "numero_processo": processo[:40],
+                        "vigente": vigente,
+                    })
+
+                # Pontuação baseada na gravidade
+                pts = -25
+                if sancoes_vigentes > 5:
+                    pts = -35
+                elif sancoes_vigentes > 0:
+                    pts = -30
+                if valor_total_multas > 1_000_000:
+                    pts -= 5
+
+                resumo = f"⚠ LISTADA NO CEIS: {len(todos_dados)} sanção(ões)"
+                if sancoes_vigentes:
+                    resumo += f" | {sancoes_vigentes} VIGENTE(S)"
+                if valor_total_multas > 0:
+                    resumo += f" | Multas: R$ {valor_total_multas:,.2f}"
+
+                detalhe = f"Órgãos: {', '.join(list(orgaos)[:3])} | Tipos: {', '.join(list(tipos)[:3])}"
+
+                resultado = fonte_ok("CEIS/CNEP – Sanções","confirmacao", resumo, detalhe, pts)
+                resultado["sancoes_detalhes"] = sancoes_completas
+                resultado["total_sancoes"] = len(todos_dados)
+                resultado["sancoes_vigentes"] = sancoes_vigentes
+                resultado["valor_total_multas"] = valor_total_multas
+                resultado["orgaos_sancionadores"] = list(orgaos)
+                resultado["tipos_sancao"] = list(tipos)
                 return resultado
 
             # Consulta CNEP também
@@ -2174,6 +2264,61 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
         ("ALIGN",(1,0),(1,-1),"RIGHT"),
     ]))
     els.append(tm)
+
+    # ═══ CEIS/CNEP — SANÇÕES DETALHADAS ════════════════════════════════
+    fontes_resultado = resultado.get("fontes", [])
+    fonte_ceis = next((f for f in fontes_resultado if "CEIS" in f.get("fonte","")), {})
+    sancoes_lista = fonte_ceis.get("sancoes_detalhes", [])
+
+    if sancoes_lista:
+        els += secao("SANÇÕES — CEIS/CNEP (Portal da Transparência)")
+        total_s = fonte_ceis.get("total_sancoes", len(sancoes_lista))
+        vigentes = fonte_ceis.get("sancoes_vigentes", 0)
+        valor_multas = fonte_ceis.get("valor_total_multas", 0)
+
+        # Resumo
+        resumo_txt = f"Total: {total_s} sanção(ões)"
+        if vigentes:
+            resumo_txt += f" | Vigentes: {vigentes}"
+        if valor_multas > 0:
+            resumo_txt += f" | Multas: R$ {valor_multas:,.2f}"
+        els.append(Paragraph(resumo_txt,
+            ps("sr", fontName="Helvetica-Bold", fontSize=9, textColor=RED)))
+        els.append(Spacer(1,6))
+
+        # Tabela de sanções
+        rows = [["Tipo","Órgão Sancionador","Início","Fim","Multa (R$)","Vigente"]]
+        for s in sancoes_lista[:15]:  # max 15 no PDF
+            rows.append([
+                Paragraph(s.get("tipo","")[:45], ps("sc", fontSize=6)),
+                Paragraph(s.get("orgao","")[:45], ps("so", fontSize=6)),
+                s.get("inicio","")[:10],
+                s.get("fim","")[:10],
+                f"{s.get('valor_multa',0):,.0f}" if s.get("valor_multa",0) > 0 else "—",
+                Paragraph("SIM" if s.get("vigente") else "não",
+                    ps("sv", fontSize=6, fontName="Helvetica-Bold",
+                        textColor=RED if s.get("vigente") else MUTED)),
+            ])
+
+        tc = Table(rows, colWidths=[4.5*cm, 4.5*cm, 2*cm, 2*cm, 2.5*cm, 1.5*cm])
+        tc.setStyle(TableStyle([
+            ("BACKGROUND",(0,0),(-1,0),RED),
+            ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+            ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+            ("FONTSIZE",(0,0),(-1,-1),6),
+            ("GRID",(0,0),(-1,-1),0.3,BORD),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+            ("PADDING",(0,0),(-1,-1),3),
+            ("ALIGN",(2,0),(5,-1),"CENTER"),
+        ]))
+        els.append(tc)
+        els.append(Spacer(1,6))
+
+        if total_s > 15:
+            els.append(Paragraph(
+                f"* Exibindo 15 de {total_s} sanções. Consultar lista completa em portaldatransparencia.gov.br",
+                ps("sn", fontSize=7, textColor=MUTED)))
+        els.append(Spacer(1,8))
 
     # ═══ GRUPO ECONÔMICO ════════════════════════════════════════════════
     grupo = resultado.get("grupo_economico", {})
