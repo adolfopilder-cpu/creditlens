@@ -2135,8 +2135,7 @@ async def analisar_completo(
     cnpj: str = Form(...),
     balanco: Optional[UploadFile] = File(None),
     cisp: Optional[UploadFile] = File(None),
-    cnd_file: Optional[UploadFile] = None,
-    crf_file: Optional[UploadFile] = None,
+
 ):
     """
     Endpoint principal — recebe CNPJ + PDFs e retorna análise completa.
@@ -2159,15 +2158,7 @@ async def analisar_completo(
         texto_cnd = nome_cnd = ""
         texto_crf = nome_crf = ""
 
-        if cnd_file:
-            b = await cnd_file.read()
-            nome_cnd = cnd_file.filename or ""
-            texto_cnd = extrair_texto_arquivo(b, nome_cnd)
-
-        if crf_file:
-            b = await crf_file.read()
-            nome_crf = crf_file.filename or ""
-            texto_crf = extrair_texto_arquivo(b, nome_crf)
+        texto_cnd = nome_cnd = texto_crf = nome_crf = ""
 
         # Pega UF da Receita para chamar o worker correto
         rec_tmp = consultar_receita(limpar_cnpj(cnpj))
