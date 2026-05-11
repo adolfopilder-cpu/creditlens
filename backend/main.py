@@ -780,6 +780,32 @@ def consultar_worker(cnpj: str, razao: str, uf: str, fontes: list) -> list:
             f"Worker indisponível: {str(e)[:80]}", "", 0
         )]
 
+
+def consultar_grupo_economico(cnpj: str) -> dict:
+    """Consulta grupo econômico e sócios via worker."""
+    if not WORKER_URL:
+        return {}
+    try:
+        # Grupo econômico
+        req = urllib.request.Request(
+            f"{WORKER_URL}/grupo/{cnpj}",
+            headers={"User-Agent": "PILDER-Render/5.0"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            grupo = json.loads(r.read())
+
+        # Visão 360 dos sócios
+        req2 = urllib.request.Request(
+            f"{WORKER_URL}/socios/{cnpj}",
+            headers={"User-Agent": "PILDER-Render/5.0"},
+        )
+        with urllib.request.urlopen(req2, timeout=30) as r2:
+            socios = json.loads(r2.read())
+
+        return {"grupo": grupo, "socios": socios}
+    except Exception as e:
+        return {"erro": str(e)[:100]}
+
 # ══════════════════════════════════════════════════════════════════
 # FONTES PÚBLICAS
 # ══════════════════════════════════════════════════════════════════
@@ -1191,8 +1217,220 @@ def calcular_score(fontes, bal, cisp):
 # ══════════════════════════════════════════════════════════════════
 # ORQUESTRAÇÃO
 # ══════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════
+# PARSER CND — CERTIDÃO NEGATIVA DE DÉBITOS RECEITA/PGFN
+# ══════════════════════════════════════════════════════════════════
+def analisar_cnd(texto: str, nome: str = "") -> dict:
+    """
+    Lê o PDF da CND (Certidão Negativa de Débitos) Receita Federal / PGFN.
+    Classifica: Negativa / Positiva com efeitos / Positiva
+    """
+    if not texto or len(texto.strip()) < 50:
+        return {
+            "disponivel": False, "arquivo": nome,
+            "tipo": None, "validade": None, "pontos": -3,
+            "resumo": "CND não anexada — regularidade fiscal não confirmada",
+            "red_flags": [], "yellow_flags": ["CND não anexada — solicitar ao cliente"],
+            "green_flags": [],
+        }
+
+    tl = texto.lower()
+
+    # Detecta tipo da certidão
+    if "negativa de débitos" in tl or "certidão negativa" in tl:
+        if "positiva com efeitos de negativa" in tl or "efeitos de negativa" in tl:
+            tipo = "positiva_efeitos_negativa"
+        else:
+            tipo = "negativa"
+    elif "positiva de débitos" in tl or "certidão positiva" in tl:
+        tipo = "positiva"
+    elif "parcelamento" in tl or "suspen" in tl:
+        tipo = "positiva_efeitos_negativa"
+    else:
+        tipo = "desconhecido"
+
+    # Extrai validade
+    validade = None
+    m_val = re.search(r"v[aá]lid[ao]?\s*(?:at[eé]|:)?\s*(\d{2}/\d{2}/\d{4})", texto, re.IGNORECASE)
+    if not m_val:
+        m_val = re.search(r"(\d{2}/\d{2}/\d{4})", texto)
+    if m_val:
+        validade = m_val.group(1)
+
+    # Extrai código de controle
+    codigo = None
+    m_cod = re.search(r"c[oó]digo\s*(?:de\s*)?controle[:\s]+([A-Z0-9\.\-]+)", texto, re.IGNORECASE)
+    if m_cod:
+        codigo = m_cod.group(1).strip()
+
+    # Conta emissões (indicador comportamental)
+    emissoes = None
+    m_em = re.search(r"(\d+)\s*emiss[oõ]", texto, re.IGNORECASE)
+    if m_em:
+        emissoes = int(m_em.group(1))
+
+    # Verifica validade
+    vencida = False
+    if validade:
+        try:
+            from datetime import datetime
+            dt_val = datetime.strptime(validade, "%d/%m/%Y")
+            vencida = dt_val.date() < dt.date.today()
+        except Exception:
+            pass
+
+    # Score e flags
+    red, yellow, green = [], [], []
+
+    if tipo == "negativa" and not vencida:
+        pts = 8
+        green.append(f"🟢 CND NEGATIVA — empresa regular perante Receita Federal e PGFN")
+        if validade:
+            green.append(f"🟢 Válida até: {validade}")
+    elif tipo == "positiva_efeitos_negativa":
+        pts = -5
+        yellow.append("🟡 CND Positiva com efeitos de negativa — débitos com exigibilidade suspensa")
+        yellow.append("🟡 Possível parcelamento, garantia ou suspensão judicial — verificar natureza")
+        if validade:
+            yellow.append(f"🟡 Válida até: {validade}")
+    elif tipo == "positiva":
+        pts = -20
+        red.append("🔴 CND POSITIVA — empresa com débitos fiscais ativos junto à Receita/PGFN")
+        red.append("🔴 Situação fiscal irregular — exigir regularização antes da aprovação")
+    elif vencida:
+        pts = -8
+        red.append(f"🔴 CND VENCIDA em {validade} — solicitar nova emissão")
+    else:
+        pts = -3
+        yellow.append("🟡 Tipo de certidão não identificado — verificar documento original")
+
+    # Indicador comportamental de emissões
+    if emissoes and emissoes > 20:
+        yellow.append(f"🟡 {emissoes} emissões registradas — empresa em captação ativa de crédito/licitações")
+    elif emissoes and emissoes > 10:
+        yellow.append(f"🟡 {emissoes} emissões — monitorar finalidade")
+
+    TIPO_LABEL = {
+        "negativa": "NEGATIVA ✅",
+        "positiva_efeitos_negativa": "POSITIVA COM EFEITOS DE NEGATIVA ⚠️",
+        "positiva": "POSITIVA ❌",
+        "desconhecido": "TIPO NÃO IDENTIFICADO",
+    }
+
+    return {
+        "disponivel": True,
+        "arquivo": nome,
+        "tipo": tipo,
+        "tipo_label": TIPO_LABEL.get(tipo, tipo),
+        "validade": validade,
+        "vencida": vencida,
+        "codigo_controle": codigo,
+        "emissoes": emissoes,
+        "pontos": pts,
+        "resumo": f"CND {TIPO_LABEL.get(tipo, tipo)}" + (f" | Válida até: {validade}" if validade else ""),
+        "red_flags": red,
+        "yellow_flags": yellow,
+        "green_flags": green,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════
+# PARSER CRF — CERTIFICADO DE REGULARIDADE FGTS / CAIXA
+# ══════════════════════════════════════════════════════════════════
+def analisar_crf(texto: str, nome: str = "") -> dict:
+    """
+    Lê o PDF do CRF (Certificado de Regularidade do FGTS) da Caixa Econômica.
+    """
+    if not texto or len(texto.strip()) < 50:
+        return {
+            "disponivel": False, "arquivo": nome,
+            "tipo": None, "validade": None, "pontos": -2,
+            "resumo": "CRF/FGTS não anexado — regularidade trabalhista não confirmada",
+            "red_flags": [], "yellow_flags": ["CRF/FGTS não anexado — solicitar ao cliente"],
+            "green_flags": [],
+        }
+
+    tl = texto.lower()
+
+    # Detecta situação
+    if "regular" in tl and ("certificado" in tl or "crf" in tl):
+        if "irregular" in tl:
+            situacao = "irregular"
+        else:
+            situacao = "regular"
+    elif "irregular" in tl or "débito" in tl or "pendência" in tl:
+        situacao = "irregular"
+    elif "certificado de regularidade" in tl:
+        situacao = "regular"
+    else:
+        situacao = "desconhecido"
+
+    # Extrai validade
+    validade = None
+    for padrao in [r"v[aá]lid[ao]?\s*(?:at[eé]|:)?\s*(\d{2}/\d{2}/\d{4})",
+                   r"validade[:\s]+(\d{2}/\d{2}/\d{4})",
+                   r"(\d{2}/\d{2}/\d{4})"]:
+        m = re.search(padrao, texto, re.IGNORECASE)
+        if m:
+            validade = m.group(1)
+            break
+
+    # Extrai número do certificado
+    numero = None
+    m_num = re.search(r"n[uú]mero[:\s]+([A-Z0-9\.\-\/]+)", texto, re.IGNORECASE)
+    if m_num:
+        numero = m_num.group(1).strip()
+
+    # Verifica vencimento
+    vencida = False
+    if validade:
+        try:
+            dt_val = dt.datetime.strptime(validade, "%d/%m/%Y")
+            vencida = dt_val.date() < dt.date.today()
+        except Exception:
+            pass
+
+    red, yellow, green = [], [], []
+
+    if situacao == "regular" and not vencida:
+        pts = 4
+        green.append("🟢 CRF/FGTS REGULAR — empresa em dia com obrigações do FGTS")
+        if validade:
+            green.append(f"🟢 Válido até: {validade}")
+        if numero:
+            green.append(f"🟢 Certificado: {numero}")
+    elif vencida:
+        pts = -4
+        red.append(f"🔴 CRF/FGTS VENCIDO em {validade} — solicitar nova emissão")
+        yellow.append("🟡 Verificar regularidade atual em consulta-crf.caixa.gov.br")
+    elif situacao == "irregular":
+        pts = -10
+        red.append("🔴 CRF/FGTS IRREGULAR — empresa com débitos de FGTS em aberto")
+        red.append("🔴 Risco trabalhista elevado — pode indicar problemas com folha de pagamento")
+    else:
+        pts = -2
+        yellow.append("🟡 Situação CRF não identificada — verificar documento original")
+
+    return {
+        "disponivel": True,
+        "arquivo": nome,
+        "situacao": situacao,
+        "validade": validade,
+        "vencida": vencida,
+        "numero_certificado": numero,
+        "pontos": pts,
+        "resumo": f"CRF/FGTS {'REGULAR' if situacao == 'regular' else 'IRREGULAR' if situacao == 'irregular' else 'N/D'}" + (f" | Válido até: {validade}" if validade else ""),
+        "red_flags": red,
+        "yellow_flags": yellow,
+        "green_flags": green,
+    }
+
 def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
-                   texto_cisp: str = "", nome_cisp: str = "", uf: str = "") -> dict:
+                   texto_cisp: str = "", nome_cisp: str = "",
+                   texto_cnd: str = "", nome_cnd: str = "",
+                   texto_crf: str = "", nome_crf: str = "",
+                   uf: str = "") -> dict:
     if not validar_cnpj(cnpj):
         raise ValueError(f"CNPJ inválido: {cnpj}")
 
@@ -1210,13 +1448,16 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         classificar_setor(cnae),
     ]
 
-    # Chama worker PythonAnywhere para PGFN + Junta Comercial da UF correta
+    # Chama worker PythonAnywhere para PGFN + Junta + Grupo + Sócios
     worker_fontes = consultar_worker(cnpj, razao, uf_real, ["pgfn", "junta"])
     if worker_fontes:
         fontes.extend(worker_fontes)
     else:
         fontes.append(fonte_ok("PGFN / Dívida Ativa","pendente",
             "Consultar em listadevedores.pgfn.gov.br — ausência NÃO equivale a regularidade","",-5))
+
+    # Consulta grupo econômico e sócios
+    grupo_data = consultar_grupo_economico(cnpj)
 
     fontes.extend([
         fonte_ok("TST / CNDT","pendente","Emitir em cndt.tst.jus.br","",-3),
@@ -1227,7 +1468,55 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
 
     bal = analisar_balanco(texto_bal, nome_bal)
     cisp = analisar_cisp(texto_cisp, nome_cisp)
+    cnd = analisar_cnd(texto_cnd, nome_cnd)
+    crf = analisar_crf(texto_crf, nome_crf)
+
+    # Adiciona CND e CRF às fontes
+    if cnd["disponivel"]:
+        fontes.append(fonte_ok(
+            "CND — Certidão Receita/PGFN", "confirmacao" if cnd["tipo"] == "negativa"
+            else "indicio" if cnd["tipo"] == "positiva_efeitos_negativa" else "erro",
+            cnd["resumo"], "", cnd["pontos"]
+        ))
+    else:
+        fontes.append(fonte_ok(
+            "CND — Certidão Receita/PGFN", "pendente",
+            "Não anexada — solicitar ao cliente ou emitir em servicos.receitafederal.gov.br",
+            "", -3
+        ))
+
+    if crf["disponivel"]:
+        fontes.append(fonte_ok(
+            "CRF/FGTS — Caixa Econômica", "confirmacao" if crf["situacao"] == "regular"
+            else "erro",
+            crf["resumo"], "", crf["pontos"]
+        ))
+    else:
+        fontes.append(fonte_ok(
+            "CRF/FGTS — Caixa Econômica", "pendente",
+            "Não anexado — solicitar ao cliente ou emitir em consulta-crf.caixa.gov.br",
+            "", -2
+        ))
+
     score_data = calcular_score(fontes, bal, cisp)
+
+    # Gera flags de grupo econômico
+    grupo = grupo_data.get("grupo", {})
+    socios_360 = grupo_data.get("socios", {})
+
+    if grupo.get("alerta_grupo"):
+        score_data["red_flags"] = score_data.get("red_flags", []) + [
+            f"🔴 GRUPO ECONÔMICO: {grupo.get('total',0)} estabelecimentos detectados — limite deve ser calculado para o GRUPO"
+        ]
+        cross = grupo.get("cross_default", {})
+        if cross:
+            score_data["yellow_flags"] = score_data.get("yellow_flags", []) + [
+                f"🟡 Cross-default: {len(cross)} sócio(s) em múltiplos CNPJs do grupo"
+            ]
+
+    if socios_360.get("tem_alertas"):
+        for alerta in socios_360.get("alertas_socios", []):
+            score_data["red_flags"] = score_data.get("red_flags", []) + [f"🔴 SÓCIO: {alerta}"]
 
     return {
         "cnpj": cnpj, "empresa": razao,
@@ -1238,6 +1527,10 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         "total_fontes": len(fontes),
         "balanco_detalhado": bal,
         "cisp_detalhado": cisp,
+        "cnd_detalhado": cnd,
+        "crf_detalhado": crf,
+        "grupo_economico": grupo,
+        "socios_360": socios_360,
         "assinatura": ASSINATURA,
         "analisado_em": dt.datetime.now().isoformat(),
     }
@@ -1684,6 +1977,77 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
     ]))
     els.append(tm)
 
+    # ═══ GRUPO ECONÔMICO ════════════════════════════════════════════════
+    grupo = resultado.get("grupo_economico", {})
+    socios_360 = resultado.get("socios_360", {})
+
+    if grupo.get("total", 0) > 1 or socios_360.get("total_socios", 0) > 0:
+        els += secao("GRUPO ECONÔMICO E VISÃO 360 DOS SÓCIOS")
+
+        filiais = grupo.get("filiais", [])
+        if filiais:
+            els.append(Paragraph("Estabelecimentos do Grupo",
+                ps("sh", fontName="Helvetica-Bold", fontSize=9, textColor=NAVY)))
+            els.append(Spacer(1,3))
+            fil_rows = [["CNPJ","Município/UF","Abertura","Situação"]]
+            for fi in filiais:
+                sit = fi.get("situacao","")
+                fil_rows.append([
+                    fi.get("cnpj",""),
+                    f"{fi.get('municipio','')}/{fi.get('uf','')}",
+                    fi.get("abertura","")[:10],
+                    Paragraph(sit, ps("fs", fontSize=7,
+                        textColor=GRN if sit=="ATIVA" else RED,
+                        fontName="Helvetica-Bold")),
+                ])
+            tf = Table(fil_rows, colWidths=[4*cm,4*cm,3*cm,3.5*cm])
+            tf.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),NAVY),("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7),
+                ("GRID",(0,0),(-1,-1),0.3,BORD),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+                ("PADDING",(0,0),(-1,-1),3),
+            ]))
+            els.append(tf)
+            els.append(Spacer(1,4))
+
+        cross = grupo.get("cross_default", {})
+        if cross:
+            els.append(Paragraph(
+                f"⚠ Cross-default: {len(cross)} sócio(s) em múltiplos CNPJs — calcular limite pelo GRUPO",
+                ps("cd", fontName="Helvetica-Bold", fontSize=8, textColor=YEL)))
+            els.append(Spacer(1,4))
+
+        socios = socios_360.get("socios", {})
+        if socios:
+            els.append(Paragraph("Visão 360 — Sócios",
+                ps("sh", fontName="Helvetica-Bold", fontSize=9, textColor=NAVY)))
+            els.append(Spacer(1,3))
+            soc_rows = [["Sócio","Qualificação","Empresas","Processos","Alertas"]]
+            for nome, info in socios.items():
+                alertas = " | ".join(info.get("alertas",[]))[:60] if info.get("alertas") else "—"
+                proc = info.get("processos_tjsp", info.get("processos", 0))
+                soc_rows.append([
+                    Paragraph(nome[:28], ps("sn", fontSize=7, fontName="Helvetica-Bold")),
+                    Paragraph(info.get("qualificacao","")[:20], ps("sq", fontSize=7)),
+                    str(len(info.get("empresas",[]))),
+                    Paragraph(str(proc), ps("sp", fontSize=7,
+                        textColor=RED if proc>10 else YEL if proc>0 else GRN,
+                        fontName="Helvetica-Bold")),
+                    Paragraph(alertas, ps("sa", fontSize=7,
+                        textColor=YEL if alertas!="—" else MUTED)),
+                ])
+            ts = Table(soc_rows, colWidths=[4*cm,3*cm,2*cm,2*cm,6.5*cm])
+            ts.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),NAVY),("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7),
+                ("GRID",(0,0),(-1,-1),0.3,BORD),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+                ("ALIGN",(2,0),(3,-1),"CENTER"),("PADDING",(0,0),(-1,-1),3),
+            ]))
+            els.append(ts)
+            els.append(Spacer(1,6))
+
     # ═══ FONTES ══════════════════════════════════════════════════════
     els += secao("FONTES CONSULTADAS — FRAMEWORK P.I.L.D.E.R™")
 
@@ -1771,6 +2135,8 @@ async def analisar_completo(
     cnpj: str = Form(...),
     balanco: Optional[UploadFile] = File(None),
     cisp: Optional[UploadFile] = File(None),
+    cnd: Optional[UploadFile] = File(None),
+    crf: Optional[UploadFile] = File(None),
 ):
     """
     Endpoint principal — recebe CNPJ + PDFs e retorna análise completa.
@@ -1796,6 +2162,7 @@ async def analisar_completo(
 
         resultado = analisar_cnpj(
             limpar_cnpj(cnpj), texto_bal, nome_bal, texto_cisp, nome_cisp,
+            texto_cnd, nome_cnd, texto_crf, nome_crf,
             uf=uf_empresa
         )
 
