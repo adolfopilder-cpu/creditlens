@@ -845,6 +845,7 @@ def consultar_receita(cnpj):
 
 def consultar_ceis(cnpj):
     try:
+        # CEIS
         r = requests.get(
             f"https://api.portaldatransparencia.gov.br/api-de-dados/ceis?cnpjSancionado={cnpj}&pagina=1",
             headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
@@ -852,11 +853,30 @@ def consultar_ceis(cnpj):
             dados = r.json()
             if isinstance(dados,list) and dados:
                 return fonte_ok("CEIS/CNEP – Sanções","confirmacao",
-                    f"⚠ LISTADA: {len(dados)} sanção(ões)","",-25)
-            return fonte_ok("CEIS/CNEP – Sanções","ausencia","Sem registros de sanções","",3)
-    except Exception:
-        pass
-    return fonte_ok("CEIS/CNEP – Sanções","nao_consultado","Indisponível","",-2)
+                    f"⚠ LISTADA NO CEIS: {len(dados)} sanção(ões)","",-25)
+            # Consulta CNEP também
+            r2 = requests.get(
+                f"https://api.portaldatransparencia.gov.br/api-de-dados/cnep?cnpjSancionado={cnpj}&pagina=1",
+                headers={**HEADERS,"chave-api-dados":PORTAL_KEY}, timeout=TIMEOUT)
+            if r2.status_code == 200:
+                dados2 = r2.json()
+                if isinstance(dados2,list) and dados2:
+                    return fonte_ok("CEIS/CNEP – Sanções","confirmacao",
+                        f"⚠ LISTADA NO CNEP: {len(dados2)} punição(ões)","",-25)
+            return fonte_ok("CEIS/CNEP – Sanções","ausencia",
+                "Sem registros de sanções no CEIS/CNEP","",3)
+        elif r.status_code == 401:
+            return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
+                "Chave API inválida — verificar PORTAL_TRANSPARENCIA_KEY","",-2)
+        elif r.status_code == 429:
+            return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
+                "Rate limit atingido — tentar novamente em instantes","",-2)
+        else:
+            return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
+                f"HTTP {r.status_code} — indisponível","",-2)
+    except Exception as e:
+        return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
+            f"Erro: {str(e)[:60]}","",-2)
 
 def consultar_datajud(cnpj, razao="", uf=""):
     """
