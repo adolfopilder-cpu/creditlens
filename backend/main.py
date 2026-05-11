@@ -2135,8 +2135,8 @@ async def analisar_completo(
     cnpj: str = Form(...),
     balanco: Optional[UploadFile] = File(None),
     cisp: Optional[UploadFile] = File(None),
-    cnd: Optional[UploadFile] = File(None),
-    crf: Optional[UploadFile] = File(None),
+    cnd_file: Optional[UploadFile] = File(None),
+    crf_file: Optional[UploadFile] = File(None),
 ):
     """
     Endpoint principal — recebe CNPJ + PDFs e retorna análise completa.
