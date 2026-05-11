@@ -36,7 +36,8 @@ except ImportError:
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
-PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY","483f209f1d3074d582f88d16acb33b27").strip()
+PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "").strip()
+OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
 
@@ -752,6 +753,142 @@ def _parecer_cisp(red, yellow, green, ind, pts, arquivo, debito):
         linhas.append("  ✅ Comportamento POSITIVO. Aprovação conforme política.")
     linhas += ["", "━"*60, ASSINATURA]
     return "\n".join(linhas)
+
+# ══════════════════════════════════════════════════════════════════
+# OPENSANCTIONS — Sanções Internacionais
+# ══════════════════════════════════════════════════════════════════
+def consultar_opensanctions(razao: str, qsa: list = None) -> dict:
+    """
+    Consulta OpenSanctions para a empresa e seus sócios.
+    Cobre: OFAC, ONU, EU, PEP, FATF e +100 listas internacionais.
+    """
+    if not OPENSANCTIONS_KEY and not razao:
+        return fonte_ok("OpenSanctions – Sanções Internacionais", "nao_consultado",
+                        "Chave não configurada", "", -2)
+    try:
+        headers_os = {**HEADERS}
+        if OPENSANCTIONS_KEY:
+            headers_os["Authorization"] = f"ApiKey {OPENSANCTIONS_KEY}"
+
+        alertas = []
+        # Consulta empresa
+        r = requests.get(
+            f"https://api.opensanctions.org/match/default",
+            params={"q": razao[:100], "limit": 5},
+            headers=headers_os, timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            resultados = data.get("results", [])
+            for res in resultados:
+                score_os = res.get("score", 0)
+                if score_os > 0.7:
+                    datasets = [d.get("name","") for d in res.get("datasets",[])]
+                    alertas.append(f"{res.get('caption','')} — {', '.join(datasets[:3])}")
+
+        # Consulta sócios
+        for socio in (qsa or [])[:3]:
+            nome = socio.get("nome_socio","") if isinstance(socio, dict) else str(socio)
+            if not nome:
+                continue
+            r2 = requests.get(
+                f"https://api.opensanctions.org/match/default",
+                params={"q": nome[:100], "limit": 3},
+                headers=headers_os, timeout=8
+            )
+            if r2.status_code == 200:
+                data2 = r2.json()
+                for res2 in data2.get("results", []):
+                    if res2.get("score", 0) > 0.75:
+                        datasets2 = [d.get("name","") for d in res2.get("datasets",[])]
+                        alertas.append(f"SÓCIO {nome}: {res2.get('caption','')} — {', '.join(datasets2[:2])}")
+
+        if alertas:
+            return fonte_ok("OpenSanctions – Sanções Internacionais", "confirmacao",
+                f"⚠ {len(alertas)} alerta(s) em listas internacionais",
+                " | ".join(alertas[:3]), -20)
+        return fonte_ok("OpenSanctions – Sanções Internacionais", "ausencia",
+            "Sem ocorrências em listas internacionais (OFAC, ONU, EU, PEP)", "", 2)
+
+    except Exception as e:
+        return fonte_ok("OpenSanctions – Sanções Internacionais", "nao_consultado",
+            f"Erro: {str(e)[:60]}", "", -1)
+
+
+# ══════════════════════════════════════════════════════════════════
+# CNDT / TST — Certidão de Débitos Trabalhistas
+# ══════════════════════════════════════════════════════════════════
+def consultar_cndt(cnpj: str) -> dict:
+    """
+    Consulta CNDT via API pública do TST.
+    Retorna: regular, irregular ou pendente.
+    """
+    cnpj_limpo = re.sub(r"\D", "", cnpj)
+    try:
+        # Endpoint direto CNDT
+        r = requests.get(
+            f"https://cndt-certidao.tst.jus.br/certidao/emissao?cnpj={cnpj_limpo}&tipo=positiva",
+            headers=HEADERS, timeout=12, allow_redirects=True
+        )
+        if r.status_code == 200:
+            texto = r.text.lower()
+            if "negativa" in texto or "nada consta" in texto:
+                return fonte_ok("TST / CNDT – Débitos Trabalhistas", "ausencia",
+                    "CNDT NEGATIVA — sem débitos trabalhistas no TST", "", 3)
+            elif "positiva" in texto or "débito" in texto or "irregular" in texto:
+                return fonte_ok("TST / CNDT – Débitos Trabalhistas", "confirmacao",
+                    "⚠ CNDT POSITIVA — débitos trabalhistas identificados", "", -10)
+
+        # Fallback: endpoint alternativo
+        r2 = requests.get(
+            f"https://consultacadastral.tst.jus.br/Cndt/app/index.html#{cnpj_limpo}",
+            headers=HEADERS, timeout=10
+        )
+        if r2.status_code == 200:
+            return fonte_ok("TST / CNDT – Débitos Trabalhistas", "nao_consultado",
+                "CNDT — consultar manualmente em cndt.tst.jus.br", "", -2)
+
+    except Exception:
+        pass
+
+    return fonte_ok("TST / CNDT – Débitos Trabalhistas", "pendente",
+        "Emitir em cndt.tst.jus.br | CNPJ: " + cnpj_limpo[:2] + "." +
+        cnpj_limpo[2:5] + "." + cnpj_limpo[5:8] + "/" +
+        cnpj_limpo[8:12] + "-" + cnpj_limpo[12:], "", -3)
+
+
+# ══════════════════════════════════════════════════════════════════
+# SIMPLES NACIONAL — Regime Tributário
+# ══════════════════════════════════════════════════════════════════
+def consultar_simples(cnpj: str) -> dict:
+    """Consulta optante pelo Simples Nacional via BrasilAPI."""
+    cnpj_limpo = re.sub(r"\D", "", cnpj)
+    try:
+        r = requests.get(
+            f"https://brasilapi.com.br/api/cnpj/v1/{cnpj_limpo}",
+            headers=HEADERS, timeout=10
+        )
+        if r.status_code == 200:
+            data = r.json()
+            simples = data.get("opcao_pelo_simples")
+            mei = data.get("opcao_pelo_mei")
+            regime = data.get("regime_tributario", [])
+            ultimo_regime = regime[-1].get("forma_de_tributacao","") if regime else ""
+
+            if simples:
+                return fonte_ok("Simples Nacional / Regime Tributário", "confirmacao",
+                    f"Optante pelo Simples Nacional | Regime: {ultimo_regime or 'Simples'}", "", 1)
+            elif mei:
+                return fonte_ok("Simples Nacional / Regime Tributário", "confirmacao",
+                    "MEI — Microempreendedor Individual", "", 0)
+            else:
+                return fonte_ok("Simples Nacional / Regime Tributário", "confirmacao",
+                    f"Regime: {ultimo_regime or 'Lucro Real/Presumido'} — Não optante pelo Simples", "", 1)
+    except Exception:
+        pass
+    return fonte_ok("Simples Nacional / Regime Tributário", "nao_consultado",
+        "Regime tributário não consultado", "", 0)
+
 
 # ══════════════════════════════════════════════════════════════════
 # WORKER PYTHONANYWHERE — fontes que o Render não acessa
@@ -1496,12 +1633,18 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     # Pega UF real da Receita Federal (ex: PA para Okajima)
     uf_real = rec.get("uf","") or uf or "SP"
 
+    # QSA para OpenSanctions
+    qsa_raw = rec.get("raw", {}).get("qsa", []) if isinstance(rec.get("raw"), dict) else []
+
     fontes = [
         rec,
         consultar_ceis(cnpj),
+        consultar_opensanctions(razao, qsa_raw),
         consultar_datajud(cnpj, razao, uf_real),
         consultar_noticias(razao),
         classificar_setor(cnae),
+        consultar_cndt(cnpj),
+        consultar_simples(cnpj),
     ]
 
     # Chama worker PythonAnywhere para PGFN + Junta + Grupo + Sócios
@@ -1516,7 +1659,6 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     grupo_data = consultar_grupo_economico(cnpj)
 
     fontes.extend([
-        fonte_ok("TST / CNDT","pendente","Emitir em cndt.tst.jus.br","",-3),
         fonte_ok("FGTS / CRF","pendente","CRF via caixa.gov.br","",-3),
         fonte_ok("Protestos / IEPTB","pendente","Consulta via bureau especializado","",-4),
         fonte_ok("Bureau de Crédito","pendente","Score bureau requer contrato","",-6),
