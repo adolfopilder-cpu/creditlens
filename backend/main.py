@@ -2159,24 +2159,25 @@ async def analisar_completo(
         texto_cnd = nome_cnd = ""
         texto_crf = nome_crf = ""
 
-       if cnd_file:
+        if cnd_file:
             b = await cnd_file.read()
             nome_cnd = cnd_file.filename or ""
+            texto_cnd = extrair_texto_arquivo(b, nome_cnd)
 
-       if crf_file:
+        if crf_file:
             b = await crf_file.read()
             nome_crf = crf_file.filename or ""
+            texto_crf = extrair_texto_arquivo(b, nome_crf)
 
         # Pega UF da Receita para chamar o worker correto
         rec_tmp = consultar_receita(limpar_cnpj(cnpj))
         uf_empresa = rec_tmp.get("uf", "SP") if rec_tmp else "SP"
 
-      texto_cnd = nome_cnd = texto_crf = nome_crf = ""
         resultado = analisar_cnpj(
             limpar_cnpj(cnpj), texto_bal, nome_bal, texto_cisp, nome_cisp,
             texto_cnd, nome_cnd, texto_crf, nome_crf,
             uf=uf_empresa
-                )
+        )
 
         # Gera PDF com os mesmos dados — inclui balanço e CISP
         try:
