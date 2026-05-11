@@ -2163,10 +2163,9 @@ async def analisar_completo(
             b = await cnd_file.read()
             nome_cnd = cnd_file.filename or ""
 
-        if crf:
-            b = await crf.read()
-            nome_crf = crf.filename or ""
-            texto_crf = extrair_texto_arquivo(b, nome_crf)
+       if crf_file:
+            b = await crf_file.read()
+            nome_crf = crf_file.filename or ""
 
         # Pega UF da Receita para chamar o worker correto
         rec_tmp = consultar_receita(limpar_cnpj(cnpj))
