@@ -1870,6 +1870,21 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     eh_filial = re.sub(r"[^0-9]", "", cnpj)[8:12] != "0001"
     cnpj_consulta = cnpj  # usa CNPJ original — grupo econômico já cobre filiais
 
+    # QSA para OpenSanctions
+    qsa_raw = rec.get("raw", {}).get("qsa", []) if isinstance(rec.get("raw"), dict) else []
+
+    fontes = [
+        rec,
+        consultar_banco_falencias(cnpj, razao),
+        consultar_ceis(cnpj),
+        consultar_opensanctions(razao, qsa_raw),
+        consultar_datajud(cnpj_consulta, razao, uf_real),
+        consultar_noticias(razao),
+        classificar_setor(cnae),
+        consultar_cndt(cnpj),
+        consultar_simples(cnpj),
+    ]
+
     # Chama worker PythonAnywhere para PGFN + Junta + Grupo + Sócios
     worker_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["pgfn", "junta"])
     if worker_fontes:
