@@ -1076,11 +1076,16 @@ def consultar_ceis(cnpj):
                     if cpf_cnpj_sancionado and cpf_cnpj_sancionado != cnpj_limpo_check:
                         continue  # Pula — é de outro CNPJ/CPF
 
-                   # Verifica se o registro é realmente deste CNPJ (não de sócio)
-                    cpf_cnpj_sancionado = str(s.get("cpfCnpj","") or s.get("cnpj","") or "")
-                    cpf_cnpj_sancionado = re.sub(r"\D", "", cpf_cnpj_sancionado)
+                   # Filtra: CPF (11 dígitos) = pessoa física → pula
+                    doc_raw = (s.get("cpfCnpjSancionado") or s.get("cpfCnpj") or
+                               s.get("cnpjSancionado") or s.get("cnpj") or "")
+                    if isinstance(doc_raw, dict):
+                        doc_raw = doc_raw.get("cpfCnpj","") or ""
+                    doc_limpo = re.sub(r"\D", "", str(doc_raw))
                     cnpj_limpo_check = re.sub(r"\D", "", cnpj)
-                    if cpf_cnpj_sancionado and cpf_cnpj_sancionado != cnpj_limpo_check:
+                    if doc_limpo and len(doc_limpo) == 11:
+                        continue
+                    if doc_limpo and len(doc_limpo) == 14 and doc_limpo != cnpj_limpo_check:
                         continue
 
                     # Verifica se está vigente
