@@ -1405,12 +1405,22 @@ def consultar_datajud(cnpj, razao="", uf=""):
                 {"match": {"partes.documento": cnpj_limpo}},
                 {"match": {"partes.cpfCnpj": cnpj_limpo}},
             ]
-            # Adiciona busca por razão social para capturar RJ/Falência
+            # Busca por razão social — essencial para RJ/Falência
             if razao and len(razao) > 5:
-                razao_curta = " ".join(razao.split()[:4])  # primeiras 4 palavras
-                should_clauses.append(
-                    {"match_phrase": {"partes.nome": razao_curta}}
-                )
+                # Remove sufixos comuns de RJ para melhor match
+                razao_clean = razao.upper()
+                for sufixo in ["EM RECUPERACAO JUDICIAL", "EM RECUPERAÇÃO JUDICIAL",
+                               "LTDA", "S.A.", "SA", "EIRELI", "ME", "EPP", "LIMITADA"]:
+                    razao_clean = razao_clean.replace(sufixo, "").strip()
+                razao_clean = razao_clean.strip(" -.")
+                palavras = [p for p in razao_clean.split() if len(p) > 3][:3]
+                if palavras:
+                    should_clauses.append(
+                        {"match_phrase": {"partes.nome": " ".join(palavras)}}
+                    )
+                    should_clauses.append(
+                        {"match": {"partes.nome": {"query": " ".join(palavras), "operator": "and"}}}
+                    )
             query = {
                 "query": {
                     "bool": {
@@ -1419,6 +1429,7 @@ def consultar_datajud(cnpj, razao="", uf=""):
                     }
                 },
                 "size": 50,
+                "size": 100,
                 "_source": [
                     "numeroProcesso", "classeProcessual", "assuntos",
                     "partes", "valorCausa", "dataAjuizamento",
