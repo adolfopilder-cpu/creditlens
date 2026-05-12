@@ -851,10 +851,10 @@ def consultar_cndt(cnpj: str) -> dict:
     except Exception:
         pass
 
-    return fonte_ok("TST / CNDT – Débitos Trabalhistas", "pendente",
+    return fonte_ok("TST / CNDT – Débitos Trabalhistas", "info",
         "Emitir em cndt.tst.jus.br | CNPJ: " + cnpj_limpo[:2] + "." +
         cnpj_limpo[2:5] + "." + cnpj_limpo[5:8] + "/" +
-        cnpj_limpo[8:12] + "-" + cnpj_limpo[12:], "", -3)
+        cnpj_limpo[8:12] + "-" + cnpj_limpo[12:], "", 0)
 
 
 # ══════════════════════════════════════════════════════════════════
