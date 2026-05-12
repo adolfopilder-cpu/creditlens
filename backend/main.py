@@ -890,6 +890,96 @@ def consultar_simples(cnpj: str) -> dict:
         "Regime tributário não consultado", "", 0)
 
 
+
+# ══════════════════════════════════════════════════════════════════
+# BANCO DE FALÊNCIAS E RECUPERAÇÕES JUDICIAIS — TST
+# ══════════════════════════════════════════════════════════════════
+def consultar_banco_falencias(cnpj: str, razao: str = "") -> dict:
+    """
+    Consulta o Banco de Falências e Recuperações Judiciais do TST.
+    Fonte oficial: bancofalencia.tst.jus.br
+    Também verifica na razão social da Receita (contém "EM RECUPERACAO JUDICIAL")
+    """
+    cnpj_limpo = re.sub(r"[^0-9]", "", cnpj)
+
+    # 1. Verifica na própria razão social (Receita Federal já indica)
+    razao_upper = razao.upper()
+    if any(termo in razao_upper for termo in [
+        "RECUPERACAO JUDICIAL", "RECUPERAÇÃO JUDICIAL",
+        "EM RECUPER", "FALENCIA", "FALÊNCIA", "MASSA FALIDA"
+    ]):
+        tipo = "RECUPERAÇÃO JUDICIAL" if "RECUPER" in razao_upper else "FALÊNCIA"
+        return fonte_ok(
+            "Recuperação Judicial / Falência", "confirmacao",
+            f"⚠ {tipo} — identificado na razão social cadastrada na Receita Federal",
+            f"Razão social: {razao}", -45,
+            {"tipo": tipo, "fonte_deteccao": "razao_social"}
+        )
+
+    # 2. Consulta API do Banco de Falências TST
+    try:
+        # Endpoint de consulta por CNPJ
+        url = f"https://bancofalencia.tst.jus.br/BFalencia/pages/consulta/consultaPublica.seam"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if r.status_code == 200 and "recupera" in r.text.lower():
+            return fonte_ok(
+                "Recuperação Judicial / Falência", "confirmacao",
+                "⚠ RECUPERAÇÃO JUDICIAL ou FALÊNCIA detectada no Banco TST",
+                "Consultar: bancofalencia.tst.jus.br", -45
+            )
+    except Exception:
+        pass
+
+    # 3. Consulta DataJud especificamente por classe processual de RJ/Falência
+    api_key = "APIKey cDZHYzlZa0JadVREZDJCendFbXNpTDQxNDJ"
+    tribunais_rj = ["TJSP", "TJRJ", "TJMG", "TJRS", "TJPR", "TJSC", "TJBA", "TJPE"]
+
+    for trib in tribunais_rj[:4]:  # Primeiros 4 — mais comuns
+        idx = f"api_publica_{trib.lower()}"
+        try:
+            query = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"terms": {"classeProcessual.codigo": [129, 130, 131, 132, 762, 763]}}
+                        ],
+                        "should": [
+                            {"match": {"partes.documento": cnpj_limpo}},
+                            {"match_phrase": {"partes.nome": " ".join(razao.split()[:3])}} if razao else {"match_all": {}}
+                        ],
+                        "minimum_should_match": 1
+                    }
+                },
+                "size": 5,
+                "_source": ["numeroProcesso", "classeProcessual", "partes", "situacao"]
+            }
+            r2 = requests.post(
+                f"https://api-publica.datajud.cnj.jus.br/{idx}/_search",
+                json=query,
+                headers={**HEADERS, "Authorization": api_key, "Content-Type": "application/json"},
+                timeout=8
+            )
+            if r2.status_code == 200:
+                hits = r2.json().get("hits", {})
+                total = hits.get("total", {}).get("value", 0)
+                if total > 0:
+                    primeiro = hits.get("hits", [{}])[0].get("_source", {})
+                    classe = primeiro.get("classeProcessual", {})
+                    nome_classe = classe.get("nome","") if isinstance(classe, dict) else str(classe)
+                    return fonte_ok(
+                        "Recuperação Judicial / Falência", "confirmacao",
+                        f"⚠ {nome_classe.upper()} detectada no {trib}",
+                        f"Processos encontrados: {total} | Tribunal: {trib}", -45,
+                        {"tipo": nome_classe, "tribunal": trib, "total": total}
+                    )
+        except Exception:
+            continue
+
+    return fonte_ok(
+        "Recuperação Judicial / Falência", "ausencia",
+        "Sem indícios de Recuperação Judicial ou Falência", "", 2
+    )
+
 # ══════════════════════════════════════════════════════════════════
 # WORKER PYTHONANYWHERE — fontes que o Render não acessa
 # ══════════════════════════════════════════════════════════════════
@@ -1770,6 +1860,7 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
 
     fontes = [
         rec,
+        consultar_banco_falencias(cnpj, razao),
         consultar_ceis(cnpj),
         consultar_opensanctions(razao, qsa_raw),
         consultar_datajud(cnpj, razao, uf_real),
