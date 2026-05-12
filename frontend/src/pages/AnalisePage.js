@@ -149,6 +149,7 @@ export default function AnalisePage() {
   const [cisp, setCisp] = useState(null);
   const [cnd, setCnd] = useState(null);
   const [crf, setCrf] = useState(null);
+  const [mostrarInfo, setMostrarInfo] = useState(false);
   const [filtroFonte, setFiltroFonte] = useState("todas");
   const [buscaFonte, setBuscaFonte] = useState("");
 
