@@ -1863,26 +1863,65 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     rec = consultar_receita(cnpj)
     razao = rec.get("razao_social","")
     cnae = rec.get("cnae","")
-    # Pega UF real da Receita Federal (ex: PA para Okajima)
     uf_real = rec.get("uf","") or uf or "SP"
 
-    # QSA para OpenSanctions
-    qsa_raw = rec.get("raw", {}).get("qsa", []) if isinstance(rec.get("raw"), dict) else []
+    # Detecta se é filial e busca matriz para QSA e dados completos
+    identificador = rec.get("raw",{}).get("identificador_matriz_filial",1) if isinstance(rec.get("raw"),dict) else 1
+    cnpj_raiz = re.sub(r"[^0-9]", "", cnpj)[:8]
+    eh_filial = identificador == 2 or re.sub(r"[^0-9]", "", cnpj)[8:12] != "0001"
+
+    rec_matriz = rec  # fallback
+    cnpj_matriz = cnpj
+    if eh_filial:
+        # Calcula CNPJ da matriz (estabelecimento 0001)
+        def calc_dv(cnpj12):
+            def c(b, p):
+                s = sum(int(x)*y for x,y in zip(b,p))
+                r = s % 11
+                return "0" if r < 2 else str(11-r)
+            d1 = c(cnpj12, [5,4,3,2,9,8,7,6,5,4,3,2])
+            d2 = c(cnpj12+d1, [6,5,4,3,2,9,8,7,6,5,4,3,2])
+            return d1+d2
+        cnpj12_matriz = cnpj_raiz + "0001"
+        dv = calc_dv(cnpj12_matriz)
+        cnpj_matriz = cnpj12_matriz + dv
+        rec_matriz_tmp = consultar_receita(cnpj_matriz)
+        if rec_matriz_tmp.get("razao_social"):
+            rec_matriz = rec_matriz_tmp
+            # Usa QSA e razão da matriz para análise
+            if not rec.get("raw",{}).get("qsa") and rec_matriz.get("raw",{}).get("qsa"):
+                razao = rec_matriz.get("razao_social", razao)
+
+    # QSA — usa da matriz se filial não tiver
+    qsa_raw = []
+    if isinstance(rec.get("raw"), dict):
+        qsa_raw = rec["raw"].get("qsa", [])
+    if not qsa_raw and eh_filial and isinstance(rec_matriz.get("raw"), dict):
+        qsa_raw = rec_matriz["raw"].get("qsa", [])
+
+    # Aviso de filial no relatório
+    if eh_filial:
+        fontes_extra_info = f"FILIAL — Matriz: {cnpj_matriz} | QSA obtido da matriz"
+    else:
+        fontes_extra_info = ""
 
     fontes = [
         rec,
         consultar_banco_falencias(cnpj, razao),
         consultar_ceis(cnpj),
         consultar_opensanctions(razao, qsa_raw),
-        consultar_datajud(cnpj, razao, uf_real),
+        consultar_datajud(cnpj_consulta, razao, uf_real),
         consultar_noticias(razao),
         classificar_setor(cnae),
         consultar_cndt(cnpj),
         consultar_simples(cnpj),
     ]
 
+    # Para filiais — consulta PGFN e processos também na matriz
+    cnpj_consulta = cnpj_matriz if eh_filial else cnpj
+
     # Chama worker PythonAnywhere para PGFN + Junta + Grupo + Sócios
-    worker_fontes = consultar_worker(cnpj, razao, uf_real, ["pgfn", "junta"])
+    worker_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["pgfn", "junta"])
     if worker_fontes:
         fontes.extend(worker_fontes)
     else:
@@ -1890,7 +1929,7 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
             "Consultar em listadevedores.pgfn.gov.br — ausência NÃO equivale a regularidade","",-5))
 
     # Consulta grupo econômico e sócios
-    grupo_data = consultar_grupo_economico(cnpj)
+    grupo_data = consultar_grupo_economico(cnpj_consulta)
 
     fontes.extend([
         fonte_ok("FGTS / CRF","pendente","CRF via caixa.gov.br","",-3),
