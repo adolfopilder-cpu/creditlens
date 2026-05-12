@@ -1010,29 +1010,44 @@ def consultar_worker(cnpj: str, razao: str, uf: str, fontes: list) -> list:
 
 
 def consultar_grupo_economico(cnpj: str) -> dict:
-    """Consulta grupo econômico e sócios via worker."""
+    """Consulta grupo econômico e sócios via worker com threading."""
     if not WORKER_URL:
         return {}
-    try:
-        # Grupo econômico
-        req = urllib.request.Request(
-            f"{WORKER_URL}/grupo/{cnpj}",
-            headers={"User-Agent": "PILDER-Render/5.0"},
-        )
-        with urllib.request.urlopen(req, timeout=30) as r:
-            grupo = json.loads(r.read())
 
-        # Visão 360 dos sócios
-        req2 = urllib.request.Request(
-            f"{WORKER_URL}/socios/{cnpj}",
-            headers={"User-Agent": "PILDER-Render/5.0"},
-        )
-        with urllib.request.urlopen(req2, timeout=30) as r2:
-            socios = json.loads(r2.read())
+    import threading
+    grupo = {}
+    socios = {}
+    errors = []
 
-        return {"grupo": grupo, "socios": socios}
-    except Exception as e:
-        return {"erro": str(e)[:100]}
+    def fetch_grupo():
+        try:
+            req = urllib.request.Request(
+                f"{WORKER_URL}/grupo/{cnpj}",
+                headers={"User-Agent": "PILDER-Render/5.0"},
+            )
+            with urllib.request.urlopen(req, timeout=45) as r:
+                grupo.update(json.loads(r.read()))
+        except Exception as e:
+            errors.append(f"grupo: {str(e)[:50]}")
+
+    def fetch_socios():
+        try:
+            req2 = urllib.request.Request(
+                f"{WORKER_URL}/socios/{cnpj}",
+                headers={"User-Agent": "PILDER-Render/5.0"},
+            )
+            with urllib.request.urlopen(req2, timeout=45) as r2:
+                socios.update(json.loads(r2.read()))
+        except Exception as e:
+            errors.append(f"socios: {str(e)[:50]}")
+
+    # Executa em paralelo
+    t1 = threading.Thread(target=fetch_grupo)
+    t2 = threading.Thread(target=fetch_socios)
+    t1.start(); t2.start()
+    t1.join(timeout=50); t2.join(timeout=50)
+
+    return {"grupo": grupo, "socios": socios, "erros": errors}
 
 # ══════════════════════════════════════════════════════════════════
 # FONTES PÚBLICAS
@@ -1537,15 +1552,26 @@ def consultar_datajud(cnpj, razao="", uf=""):
     if tribunais_com_resultado:
         resumo_partes.append(f"Tribunais: {', '.join(tribunais_com_resultado)}")
     if polo_passivo:
-        resumo_partes.append(f"Polo passivo: {polo_passivo}")
+        resumo_partes.append(f"Polo passivo (réu): {polo_passivo}")
     if polo_ativo:
-        resumo_partes.append(f"Polo ativo: {polo_ativo}")
+        resumo_partes.append(f"Polo ativo (autor): {polo_ativo}")
     if exec_fiscal:
-        resumo_partes.append(f"Exec. fiscal: {exec_fiscal}")
+        resumo_partes.append(f"⚠ Exec. fiscal: {exec_fiscal}")
     if exec_trab:
         resumo_partes.append(f"Trabalhistas: {exec_trab}")
     if valor_total > 0:
-        resumo_partes.append(f"Valor total: R$ {valor_total:,.0f}")
+        resumo_partes.append(f"Valor em disputa: R$ {valor_total:,.0f}")
+
+    # Análise semântica — classificação do perfil processual
+    if total > 0:
+        if exec_fiscal > 0 and polo_passivo > exec_fiscal:
+            resumo_partes.append("Perfil: empresa com histórico de disputas fiscais")
+        elif exec_trab > 0 and exec_trab > total * 0.5:
+            resumo_partes.append("Perfil: alto volume trabalhista — verificar relações de trabalho")
+        elif polo_ativo > polo_passivo:
+            resumo_partes.append("Perfil: empresa predominantemente autora — recuperação de créditos")
+        elif polo_passivo > 10:
+            resumo_partes.append("Perfil: alto volume de ações contra a empresa")
 
     if not resumo_partes or (len(resumo_partes) == 1 and "processo(s)" in resumo_partes[0]):
         resumo = f"0 processo(s) | Execuções: 0 | Trabalhistas: 0 | Tribunais: {', '.join(tribunais_consultar[:4])}"
@@ -1921,10 +1947,11 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     # Consulta grupo econômico e sócios
     grupo_data = consultar_grupo_economico(cnpj_consulta)
 
+    # Fontes informativas — não penalizam score (aguardando RPA/contrato)
     fontes.extend([
-        fonte_ok("FGTS / CRF","pendente","CRF via caixa.gov.br","",-3),
-        fonte_ok("Protestos / IEPTB","pendente","Consulta via bureau especializado","",-4),
-        fonte_ok("Bureau de Crédito","pendente","Score bureau requer contrato","",-6),
+        fonte_ok("FGTS / CRF","info","Emitir em consulta-crf.caixa.gov.br",""  ,0),
+        fonte_ok("Protestos / IEPTB","info","Consulta via IEPTB/CENPROT — contrato necessário","",0),
+        fonte_ok("Bureau de Crédito","info","Serasa/Boa Vista — contrato necessário","",0),
     ])
 
     bal = analisar_balanco(texto_bal, nome_bal)
@@ -1941,9 +1968,9 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         ))
     else:
         fontes.append(fonte_ok(
-            "CND — Certidão Receita/PGFN", "pendente",
-            "Não anexada — solicitar ao cliente ou emitir em servicos.receitafederal.gov.br",
-            "", -3
+            "CND — Certidão Receita/PGFN", "info",
+            "Solicitar ao cliente ou emitir em servicos.receitafederal.gov.br",
+            "", 0
         ))
 
     if crf["disponivel"]:
@@ -1954,9 +1981,9 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         ))
     else:
         fontes.append(fonte_ok(
-            "CRF/FGTS — Caixa Econômica", "pendente",
-            "Não anexado — solicitar ao cliente ou emitir em consulta-crf.caixa.gov.br",
-            "", -2
+            "CRF/FGTS — Caixa Econômica", "info",
+            "Solicitar ao cliente ou emitir em consulta-crf.caixa.gov.br",
+            "", 0
         ))
 
     score_data = calcular_score(fontes, bal, cisp)
