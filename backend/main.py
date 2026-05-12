@@ -36,7 +36,7 @@ except ImportError:
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
-PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY","483f209f1d3074d582f88d16acb33b27").strip()
+PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "").strip()
 OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
@@ -984,9 +984,10 @@ def consultar_ceis(cnpj):
     if not PORTAL_KEY:
         return fonte_ok("CEIS/CNEP – Sanções","nao_consultado",
             "Chave Portal Transparência não configurada","",-2)
-    # Formata CNPJ corretamente: XX.XXX.XXX/XXXX-XX
-    c = re.sub(r"\D", "", cnpj)
+    # Formata CNPJ e também mantém versão limpa
+    c = re.sub(r"[^0-9]", "", cnpj)
     cnpj_fmt = f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}" if len(c) == 14 else cnpj
+    cnpj_limpo = c
     try:
         # CEIS — usa CNPJ formatado
         r = requests.get(
@@ -1066,26 +1067,26 @@ def consultar_ceis(cnpj):
                     publicacao = s.get("dataPublicacaoDou","")[:10] if s.get("dataPublicacaoDou") else ""
                     processo = s.get("numeroProcesso","") or s.get("processo","") or ""
                     # Log dos campos disponíveis (para debug)
-                    campos_disponíveis = list(s.keys())
-
-                    # Verifica se o registro é realmente deste CNPJ (não de sócio)
-                    cpf_cnpj_sancionado = str(s.get("cpfCnpj","") or s.get("cnpj","") or "")
-                    cpf_cnpj_sancionado = re.sub(r"\D", "", cpf_cnpj_sancionado)
-                    cnpj_limpo_check = re.sub(r"\D", "", cnpj)
-                    # Só inclui se for o mesmo CNPJ ou campo vazio
-                    if cpf_cnpj_sancionado and cpf_cnpj_sancionado != cnpj_limpo_check:
-                        continue  # Pula — é de outro CNPJ/CPF
-
-                   # Filtra: CPF (11 dígitos) = pessoa física → pula
-                    doc_raw = (s.get("cpfCnpjSancionado") or s.get("cpfCnpj") or
-                               s.get("cnpjSancionado") or s.get("cnpj") or "")
-                    if isinstance(doc_raw, dict):
-                        doc_raw = doc_raw.get("cpfCnpj","") or ""
-                    doc_limpo = re.sub(r"\D", "", str(doc_raw))
-                    cnpj_limpo_check = re.sub(r"\D", "", cnpj)
-                    if doc_limpo and len(doc_limpo) == 11:
+                    # Busca CNPJ do sancionado em todos os campos possíveis
+                    doc = ""
+                    for campo in s.keys():
+                        if "cnpj" in campo.lower() or "cpf" in campo.lower() or "doc" in campo.lower():
+                            v = s[campo]
+                            if isinstance(v, str) and v:
+                                doc = v
+                                break
+                            elif isinstance(v, dict):
+                                for k2, v2 in v.items():
+                                    if isinstance(v2, str) and v2 and re.search(r"[0-9]", v2):
+                                        doc = v2
+                                        break
+                    doc_num = re.sub(r"[^0-9]", "", doc)
+                    cnpj_num = re.sub(r"[^0-9]", "", cnpj)
+                    # Pula CPFs (11 dígitos = pessoa física)
+                    if len(doc_num) == 11:
                         continue
-                    if doc_limpo and len(doc_limpo) == 14 and doc_limpo != cnpj_limpo_check:
+                    # Pula CNPJs diferentes do consultado
+                    if len(doc_num) == 14 and doc_num != cnpj_num:
                         continue
 
                     # Verifica se está vigente
