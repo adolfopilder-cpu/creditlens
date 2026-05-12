@@ -38,8 +38,6 @@ ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Cr
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
 PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "483f209f1d3074d582f88d16acb33b27").strip()
 OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
-PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "").strip()
-OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
 TIMEOUT = 20
 
@@ -914,7 +912,7 @@ def consultar_banco_falencias(cnpj: str, razao: str = "") -> dict:
         return fonte_ok(
             "Recuperação Judicial / Falência", "confirmacao",
             f"⚠ {tipo} — identificado na razão social cadastrada na Receita Federal",
-            f"Razão social: {razao}", -45,
+            f"Razão social: {razao}", -30,
             {"tipo": tipo, "fonte_deteccao": "razao_social"}
         )
 
@@ -1512,7 +1510,7 @@ def consultar_datajud(cnpj, razao="", uf=""):
 
     # Score
     if rj or falencia:
-        pts = -45
+        pts = -20  # RJ não impede totalmente — reduz mas mantém análise
     elif exec_fiscal >= 5 or polo_passivo >= 20:
         pts = -15
     elif exec_fiscal >= 1 or polo_passivo >= 5:
@@ -1581,8 +1579,17 @@ def consultar_noticias(razao):
         r = requests.get(url, headers=HEADERS, timeout=8)
         if r.status_code == 200:
             n = r.text.count("<item>")
-            if n > 5: return fonte_ok("Reputação / Mídia","indicio",f"⚠ {n} notícias negativas","",-8)
-            if n > 0: return fonte_ok("Reputação / Mídia","indicio",f"{n} notícia(s) negativa(s)","",-3)
+            # Pondera por volume — empresa grande tem mais notícias naturalmente
+            if n >= 50: pts_n = -6   # muitas notícias = empresa conhecida com problemas
+            elif n >= 20: pts_n = -5
+            elif n >= 10: pts_n = -4
+            elif n > 5:  pts_n = -3
+            elif n > 0:  pts_n = -2
+            else:        pts_n = 2
+            if n > 5:
+                return fonte_ok("Reputação / Mídia","indicio",f"⚠ {n} notícias negativas","",pts_n)
+            if n > 0:
+                return fonte_ok("Reputação / Mídia","indicio",f"{n} notícia(s) negativa(s)","",pts_n)
             return fonte_ok("Reputação / Mídia","ausencia","Sem notícias negativas","",2)
     except Exception:
         pass
