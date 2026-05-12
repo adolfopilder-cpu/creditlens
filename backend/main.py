@@ -1870,8 +1870,24 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     eh_filial = re.sub(r"[^0-9]", "", cnpj)[8:12] != "0001"
     cnpj_consulta = cnpj  # usa CNPJ original — grupo econômico já cobre filiais
 
-    # QSA para OpenSanctions
+    # Se filial sem QSA, busca sócios da matriz
     qsa_raw = rec.get("raw", {}).get("qsa", []) if isinstance(rec.get("raw"), dict) else []
+    if not qsa_raw and eh_filial:
+        try:
+            def _calc_dv(c12):
+                def _c(b,p):
+                    s=sum(int(x)*y for x,y in zip(b,p)); r=s%11
+                    return "0" if r<2 else str(11-r)
+                return _c(c12,[5,4,3,2,9,8,7,6,5,4,3,2])+_c(c12+_c(c12,[5,4,3,2,9,8,7,6,5,4,3,2]),[6,5,4,3,2,9,8,7,6,5,4,3,2])
+            cnpj12_m = cnpj_raiz + "0001"
+            cnpj_m = cnpj12_m + _calc_dv(cnpj12_m)
+            rec_m = consultar_receita(cnpj_m)
+            if rec_m and isinstance(rec_m.get("raw"), dict):
+                qsa_raw = rec_m["raw"].get("qsa", [])
+                if not razao or "FILIAL" in razao.upper():
+                    razao = rec_m.get("razao_social", razao) or razao
+        except Exception:
+            pass
 
     fontes = [
         rec,
