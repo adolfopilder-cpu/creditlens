@@ -36,6 +36,8 @@ except ImportError:
 
 ASSINATURA = "P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito"
 WORKER_URL = os.environ.get("PILDER_WORKER_URL", "https://pilder12.pythonanywhere.com")
+PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "483f209f1d3074d582f88d16acb33b27").strip()
+OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
 PORTAL_KEY = os.environ.get("PORTAL_TRANSPARENCIA_KEY", "").strip()
 OPENSANCTIONS_KEY = os.environ.get("OPENSANCTIONS_KEY", "").strip()
 HEADERS = {"User-Agent": "PILDER-PRO/5.0"}
