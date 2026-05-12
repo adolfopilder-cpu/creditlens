@@ -1918,7 +1918,7 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
     ]
 
     # Para filiais — consulta PGFN e processos também na matriz
-    cnpj_consulta = cnpj_matriz if eh_filial else cnpj
+    cnpj_consulta = cnpj_matriz if (eh_filial and cnpj_matriz != cnpj) else cnpj
 
     # Chama worker PythonAnywhere para PGFN + Junta + Grupo + Sócios
     worker_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["pgfn", "junta"])
