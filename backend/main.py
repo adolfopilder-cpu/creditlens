@@ -1279,9 +1279,10 @@ def consultar_datajud(cnpj, razao="", uf=""):
     }
 
     # Define quais tribunais consultar
-    # Sempre: TRF1 (nacional), TST (nacional) + tribunais da UF
+    # Sempre: TRF1 (nacional), TST + tribunais da UF
+    # TJSP e TJRJ adicionados pois concentram a maioria das RJs/Falências
     tribunais_uf = UF_TRIBUNAIS.get(uf.upper(), []) if uf else []
-    tribunais_base = ["TRF1", "TST"]
+    tribunais_base = ["TRF1", "TST", "TJSP", "TJRJ"]
     tribunais_consultar = list(dict.fromkeys(tribunais_uf + tribunais_base))
 
     # Acumuladores
@@ -1308,14 +1309,22 @@ def consultar_datajud(cnpj, razao="", uf=""):
 
     for nome_trib, idx in [(t, TRIBUNAIS[t]) for t in tribunais_consultar if t in TRIBUNAIS]:
         try:
-            # Query: busca CNPJ em partes (polo ativo e passivo)
+            # Query: busca CNPJ e razão social (RJ frequentemente indexado por nome)
+            should_clauses = [
+                {"match": {"numeroProcesso": cnpj_limpo}},
+                {"match": {"partes.documento": cnpj_limpo}},
+                {"match": {"partes.cpfCnpj": cnpj_limpo}},
+            ]
+            # Adiciona busca por razão social para capturar RJ/Falência
+            if razao and len(razao) > 5:
+                razao_curta = " ".join(razao.split()[:4])  # primeiras 4 palavras
+                should_clauses.append(
+                    {"match_phrase": {"partes.nome": razao_curta}}
+                )
             query = {
                 "query": {
                     "bool": {
-                        "should": [
-                            {"match": {"numeroProcesso": cnpj_limpo}},
-                            {"match": {"partes.documento": cnpj_limpo}},
-                        ],
+                        "should": should_clauses,
                         "minimum_should_match": 1
                     }
                 },
