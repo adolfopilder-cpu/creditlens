@@ -397,6 +397,14 @@ export default function AnalisePage() {
                     background:"#f0f4ff", borderRadius:8,
                     border:"1px solid #c7d2fe", fontSize:11 }}>
 
+                    {/* Aviso de filial */}
+                    {r.grupo_economico?.filiais?.length > 0 &&
+                     r.grupo_economico.filiais[0]?.cnpj !== r.cnpj?.replace(/[^0-9]/g,"") && (
+                      <div style={{ fontSize:10, color:"#b45309", fontWeight:600, marginBottom:4 }}>
+                        ⚠ FILIAL — Sócios registrados na Matriz: {r.grupo_economico.cnpj_raiz}0001
+                      </div>
+                    )}
+
                     {/* Sócios */}
                     {r.socios_360?.socios && Object.keys(r.socios_360.socios).length > 0 && (
                       <div style={{ marginBottom:8 }}>
