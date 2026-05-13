@@ -1219,6 +1219,14 @@ def consultar_ceis(cnpj):
                         "vigente": vigente,
                     })
 
+                # Usa total real após filtro
+                total_filtrado = len(sancoes_completas)
+
+                if total_filtrado == 0:
+                    # Nenhuma sanção pertence a este CNPJ
+                    return fonte_ok("CEIS/CNEP – Sanções", "ausencia",
+                        "Sem registros de sanções no CEIS/CNEP para este CNPJ", "", 3)
+
                 # Pontuação baseada na gravidade
                 pts = -25
                 if sancoes_vigentes > 5:
@@ -1228,7 +1236,7 @@ def consultar_ceis(cnpj):
                 if valor_total_multas > 1_000_000:
                     pts -= 5
 
-                resumo = f"⚠ LISTADA NO CEIS: {len(todos_dados)} sanção(ões)"
+                resumo = f"⚠ LISTADA NO CEIS: {total_filtrado} sanção(ões)"
                 if sancoes_vigentes:
                     resumo += f" | {sancoes_vigentes} VIGENTE(S)"
                 if valor_total_multas > 0:
@@ -1238,7 +1246,7 @@ def consultar_ceis(cnpj):
 
                 resultado = fonte_ok("CEIS/CNEP – Sanções","confirmacao", resumo, detalhe, pts)
                 resultado["sancoes_detalhes"] = sancoes_completas
-                resultado["total_sancoes"] = len(todos_dados)
+                resultado["total_sancoes"] = total_filtrado
                 resultado["sancoes_vigentes"] = sancoes_vigentes
                 resultado["valor_total_multas"] = valor_total_multas
                 resultado["orgaos_sancionadores"] = list(orgaos)
