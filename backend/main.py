@@ -1172,36 +1172,30 @@ def consultar_ceis(cnpj):
                     publicacao = s.get("dataPublicacaoDou","")[:10] if s.get("dataPublicacaoDou") else ""
                     processo = s.get("numeroProcesso","") or s.get("processo","") or ""
                     # Log dos campos disponíveis (para debug)
-                    # Validação rigorosa: só aceita registros do CNPJ exato
-                    doc_num = ""
-                    # Varre todos os campos procurando o CNPJ/CPF do sancionado
-                    for campo in list(s.keys()):
-                        v = s.get(campo)
-                        if v is None:
-                            continue
-                        campo_lower = campo.lower()
-                        if any(t in campo_lower for t in ["cnpj","cpf","documento","sancionado"]):
-                            if isinstance(v, str):
-                                doc_num = re.sub(r"[^0-9]", "", v)
-                            elif isinstance(v, dict):
-                                for v2 in v.values():
-                                    if isinstance(v2, str) and re.search(r"[0-9]{8}", v2):
-                                        doc_num = re.sub(r"[^0-9]", "", v2)
-                                        break
-                            if doc_num:
-                                break
-
+                    # Validação pelo campo correto da API: pessoa.cnpjFormatado
                     cnpj_num = re.sub(r"[^0-9]", "", cnpj)
+                    doc_num = ""
 
-                    # REGRA RIGOROSA: descarta qualquer registro que não seja exatamente o CNPJ
-                    if doc_num:
-                        if len(doc_num) == 11:
-                            continue  # CPF — pessoa física, pula sempre
-                        if doc_num != cnpj_num:
-                            continue  # CNPJ diferente — pula sempre
-                    # Se doc_num vazio, também descarta — não podemos confirmar
-                    else:
-                        continue
+                    # Campo principal: pessoa.cnpjFormatado
+                    pessoa = s.get("pessoa", {})
+                    if isinstance(pessoa, dict):
+                        doc_num = re.sub(r"[^0-9]", "", pessoa.get("cnpjFormatado","") or "")
+                        if not doc_num:
+                            doc_num = re.sub(r"[^0-9]", "", pessoa.get("cpfFormatado","") or "")
+
+                    # Fallback: sancionado.codigoFormatado
+                    if not doc_num:
+                        sancionado = s.get("sancionado", {})
+                        if isinstance(sancionado, dict):
+                            doc_num = re.sub(r"[^0-9]", "", sancionado.get("codigoFormatado","") or "")
+
+                    # REGRA RIGOROSA: descarta se não for exatamente o CNPJ consultado
+                    if not doc_num:
+                        continue  # sem identificação — descarta
+                    if len(doc_num) == 11:
+                        continue  # CPF — pessoa física — descarta
+                    if doc_num != cnpj_num:
+                        continue  # CNPJ diferente — descarta
 
                     # Verifica se está vigente
                     vigente = not fim or fim >= dt.date.today().isoformat()
