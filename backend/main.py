@@ -1172,26 +1172,35 @@ def consultar_ceis(cnpj):
                     publicacao = s.get("dataPublicacaoDou","")[:10] if s.get("dataPublicacaoDou") else ""
                     processo = s.get("numeroProcesso","") or s.get("processo","") or ""
                     # Log dos campos disponíveis (para debug)
-                    # Busca CNPJ do sancionado em todos os campos possíveis
-                    doc = ""
-                    for campo in s.keys():
-                        if "cnpj" in campo.lower() or "cpf" in campo.lower() or "doc" in campo.lower():
-                            v = s[campo]
-                            if isinstance(v, str) and v:
-                                doc = v
-                                break
+                    # Validação rigorosa: só aceita registros do CNPJ exato
+                    doc_num = ""
+                    # Varre todos os campos procurando o CNPJ/CPF do sancionado
+                    for campo in list(s.keys()):
+                        v = s.get(campo)
+                        if v is None:
+                            continue
+                        campo_lower = campo.lower()
+                        if any(t in campo_lower for t in ["cnpj","cpf","documento","sancionado"]):
+                            if isinstance(v, str):
+                                doc_num = re.sub(r"[^0-9]", "", v)
                             elif isinstance(v, dict):
-                                for k2, v2 in v.items():
-                                    if isinstance(v2, str) and v2 and re.search(r"[0-9]", v2):
-                                        doc = v2
+                                for v2 in v.values():
+                                    if isinstance(v2, str) and re.search(r"[0-9]{8}", v2):
+                                        doc_num = re.sub(r"[^0-9]", "", v2)
                                         break
-                    doc_num = re.sub(r"[^0-9]", "", doc)
+                            if doc_num:
+                                break
+
                     cnpj_num = re.sub(r"[^0-9]", "", cnpj)
-                    # Pula CPFs (11 dígitos = pessoa física)
-                    if len(doc_num) == 11:
-                        continue
-                    # Pula CNPJs diferentes do consultado
-                    if len(doc_num) == 14 and doc_num != cnpj_num:
+
+                    # REGRA RIGOROSA: descarta qualquer registro que não seja exatamente o CNPJ
+                    if doc_num:
+                        if len(doc_num) == 11:
+                            continue  # CPF — pessoa física, pula sempre
+                        if doc_num != cnpj_num:
+                            continue  # CNPJ diferente — pula sempre
+                    # Se doc_num vazio, também descarta — não podemos confirmar
+                    else:
                         continue
 
                     # Verifica se está vigente
