@@ -2587,6 +2587,57 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
                 ps("sn", fontSize=7, textColor=MUTED)))
         els.append(Spacer(1,8))
 
+    # ═══ PGFN — DÍVIDA ATIVA FEDERAL ═══════════════════════════════════
+    pgfn_fonte = next((f for f in resultado.get("fontes",[])
+        if f.get("fonte") == "PGFN / Dívida Ativa Federal" and f.get("pgfn_total",0) > 0), None)
+
+    if pgfn_fonte:
+        els += secao("DÍVIDA ATIVA FEDERAL — PGFN")
+        total_p = pgfn_fonte.get("pgfn_total", 0)
+        valor_p = pgfn_fonte.get("pgfn_valor_total", 0.0)
+
+        els.append(Paragraph(
+            f"Total: {total_p} inscrição(ões) | Valor: R$ {valor_p:,.2f} | Ref: PGFN SIDA 202603",
+            ps("rp", fontName="Helvetica-Bold", fontSize=9, textColor=RED)))
+        els.append(Spacer(1,6))
+
+        inscricoes = pgfn_fonte.get("pgfn_inscricoes", [])
+        if inscricoes:
+            rows_p = [["Receita","Data Inscrição","Situação","Ajuizado","Valor (R$)"]]
+            for ins in inscricoes[:20]:
+                receita = ins.get("receita","")
+                if " - " in receita:
+                    receita = receita.split(" - ",1)[1]
+                rows_p.append([
+                    Paragraph(receita[:45], ps("ri", fontSize=6)),
+                    ins.get("data_inscricao",""),
+                    Paragraph(ins.get("situacao","")[:30], ps("rs", fontSize=6)),
+                    ins.get("ajuizado",""),
+                    Paragraph(f"R$ {ins.get('valor',0):,.2f}",
+                        ps("rv", fontSize=6, fontName="Helvetica-Bold",
+                            textColor=RED if ins.get("ajuizado") == "SIM" else DARK)),
+                ])
+
+            tp = Table(rows_p, colWidths=[5*cm, 2.5*cm, 3*cm, 2*cm, 4*cm])
+            tp.setStyle(TableStyle([
+                ("BACKGROUND",(0,0),(-1,0),RED),
+                ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
+                ("FONTSIZE",(0,0),(-1,-1),6),
+                ("GRID",(0,0),(-1,-1),0.3,BORD),
+                ("ROWBACKGROUNDS",(0,1),(-1,-1),[WHITE,LIGHT]),
+                ("PADDING",(0,0),(-1,-1),3),
+                ("ALIGN",(1,0),(4,-1),"CENTER"),
+            ]))
+            els.append(tp)
+            els.append(Spacer(1,4))
+
+            if total_p > 20:
+                els.append(Paragraph(
+                    f"* Exibindo 20 de {total_p} inscrições. Lista completa em listadevedores.pgfn.gov.br",
+                    ps("pn", fontSize=7, textColor=MUTED)))
+        els.append(Spacer(1,8))
+
     # ═══ GRUPO ECONÔMICO ════════════════════════════════════════════════
     grupo = resultado.get("grupo_economico", {})
     socios_360 = resultado.get("socios_360", {})
