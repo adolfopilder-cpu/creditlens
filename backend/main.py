@@ -1970,18 +1970,20 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
                 "Fonte: índice CSV PGFN 202603 — ausência NÃO equivale a regularidade fiscal plena", 3)
         fontes.append(f_pgfn)
     except Exception as e_pgfn:
-        # Fallback para endpoint antigo
-        worker_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["pgfn", "junta"])
-        if worker_fontes:
-            fontes.extend(worker_fontes)
-        else:
-            fontes.append(fonte_ok("PGFN / Dívida Ativa","pendente",
-                "Consultar em listadevedores.pgfn.gov.br","",-3))
+        # Fallback — PGFN lista devedores simples
+        fontes.append(fonte_ok("PGFN / Dívida Ativa","nao_consultado",
+            f"Índice CSV indisponível — verificar manualmente em listadevedores.pgfn.gov.br",
+            str(e_pgfn)[:80], -3))
 
-    # Chama worker para Junta Comercial
+    # Chama worker para Junta Comercial (sem duplicar)
     junta_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["junta"])
     if junta_fontes:
-        fontes.extend(junta_fontes)
+        # Remove duplicatas por nome da fonte
+        nomes_existentes = {f.get("fonte","") for f in fontes}
+        for jf in junta_fontes:
+            if jf.get("fonte","") not in nomes_existentes:
+                fontes.append(jf)
+                nomes_existentes.add(jf.get("fonte",""))
 
     # Consulta grupo econômico e sócios
     grupo_data = consultar_grupo_economico(cnpj_consulta)
