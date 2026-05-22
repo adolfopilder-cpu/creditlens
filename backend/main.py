@@ -1949,10 +1949,11 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
 
     # Consulta PGFN via índice CSV (dados completos da dívida ativa federal)
     try:
-        pgfn_url = f"{WORKER_URL}/pgfn_index/{cnpj_limpo}"
+        _cnpj_limpo = re.sub(r"[^0-9]", "", cnpj)
+        pgfn_url = f"{WORKER_URL}/pgfn_index/{_cnpj_limpo}"
         req_pgfn = urllib.request.Request(pgfn_url,
             headers={"User-Agent": "PILDER-Render/5.0"})
-        with urllib.request.urlopen(req_pgfn, timeout=30) as r_pgfn:
+        with urllib.request.urlopen(req_pgfn, timeout=60) as r_pgfn:
             pgfn_data = json.loads(r_pgfn.read())
         total_pgfn = pgfn_data.get("total", 0)
         valor_pgfn = pgfn_data.get("valor_total", 0.0)
