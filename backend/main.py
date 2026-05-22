@@ -1947,13 +1947,41 @@ def analisar_cnpj(cnpj: str, texto_bal: str = "", nome_bal: str = "",
         consultar_simples(cnpj),
     ]
 
-    # Chama worker PythonAnywhere para PGFN + Junta + Grupo + Sócios
-    worker_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["pgfn", "junta"])
-    if worker_fontes:
-        fontes.extend(worker_fontes)
-    else:
-        fontes.append(fonte_ok("PGFN / Dívida Ativa","pendente",
-            "Consultar em listadevedores.pgfn.gov.br — ausência NÃO equivale a regularidade","",-5))
+    # Consulta PGFN via índice CSV (dados completos da dívida ativa federal)
+    try:
+        pgfn_url = f"{WORKER_URL}/pgfn_index/{cnpj_limpo}"
+        req_pgfn = urllib.request.Request(pgfn_url,
+            headers={"User-Agent": "PILDER-Render/5.0"})
+        with urllib.request.urlopen(req_pgfn, timeout=30) as r_pgfn:
+            pgfn_data = json.loads(r_pgfn.read())
+        total_pgfn = pgfn_data.get("total", 0)
+        valor_pgfn = pgfn_data.get("valor_total", 0.0)
+        if total_pgfn > 0:
+            resumo_pgfn = f"⚠ DÍVIDA ATIVA FEDERAL: {total_pgfn} inscrição(ões) | Total: R$ {valor_pgfn:,.2f}"
+            f_pgfn = fonte_ok("PGFN / Dívida Ativa Federal", "confirmacao", resumo_pgfn,
+                f"Referência: {pgfn_data.get('referencia','SIDA')} | Fonte: índice CSV oficial",
+                -25 if valor_pgfn > 100000 else -15)
+            f_pgfn["pgfn_inscricoes"] = pgfn_data.get("inscricoes", [])
+            f_pgfn["pgfn_valor_total"] = valor_pgfn
+            f_pgfn["pgfn_total"] = total_pgfn
+        else:
+            f_pgfn = fonte_ok("PGFN / Dívida Ativa Federal", "ausencia",
+                "Sem inscrições na Dívida Ativa Federal (SIDA)",
+                "Fonte: índice CSV PGFN 202603 — ausência NÃO equivale a regularidade fiscal plena", 3)
+        fontes.append(f_pgfn)
+    except Exception as e_pgfn:
+        # Fallback para endpoint antigo
+        worker_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["pgfn", "junta"])
+        if worker_fontes:
+            fontes.extend(worker_fontes)
+        else:
+            fontes.append(fonte_ok("PGFN / Dívida Ativa","pendente",
+                "Consultar em listadevedores.pgfn.gov.br","",-3))
+
+    # Chama worker para Junta Comercial
+    junta_fontes = consultar_worker(cnpj_consulta, razao, uf_real, ["junta"])
+    if junta_fontes:
+        fontes.extend(junta_fontes)
 
     # Consulta grupo econômico e sócios
     grupo_data = consultar_grupo_economico(cnpj_consulta)
