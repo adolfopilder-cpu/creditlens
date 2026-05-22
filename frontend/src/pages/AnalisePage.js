@@ -267,6 +267,48 @@ export default function AnalisePage() {
                 ⚠ {pdfErro}
               </div>
             )}
+
+            {/* ── PGFN Dívida Ativa ── */}
+            {r.fontes?.find(f => f.fonte === "PGFN / Dívida Ativa Federal" && f.pgfn_total > 0) && (() => {
+              const pgfn = r.fontes.find(f => f.fonte === "PGFN / Dívida Ativa Federal");
+              return (
+                <div style={{ marginTop:10, padding:"10px 12px",
+                  background:"#fff5f5", borderRadius:8,
+                  border:"1px solid #fca5a5", fontSize:11 }}>
+                  <div style={{ fontWeight:700, color:"#c0392b", marginBottom:6, fontSize:11 }}>
+                    🏛 PGFN — DÍVIDA ATIVA FEDERAL
+                  </div>
+                  <div style={{ display:"flex", gap:16, marginBottom:6 }}>
+                    <span style={{ color:"#c0392b", fontWeight:700 }}>
+                      {pgfn.pgfn_total} inscrição(ões)
+                    </span>
+                    <span style={{ color:"#c0392b", fontWeight:700 }}>
+                      R$ {pgfn.pgfn_valor_total?.toLocaleString("pt-BR", {minimumFractionDigits:2})}
+                    </span>
+                    <span style={{ color:MUTED, fontSize:10 }}>{pgfn.detalhe}</span>
+                  </div>
+                  {pgfn.pgfn_inscricoes?.slice(0,5).map((ins, i) => (
+                    <div key={i} style={{ display:"flex", gap:8, padding:"3px 0",
+                      borderBottom:"1px solid #fee2e2", fontSize:10, color:MUTED }}>
+                      <span style={{ color:"#c0392b", minWidth:80 }}>{ins.receita?.split(" - ")[1] || ins.receita}</span>
+                      <span>{ins.data_inscricao}</span>
+                      <span style={{ color: ins.ajuizado === "SIM" ? "#c0392b" : "#b45309",
+                        fontWeight:600 }}>
+                        {ins.ajuizado === "SIM" ? "Ajuizado" : ins.situacao}
+                      </span>
+                      <span style={{ marginLeft:"auto", fontWeight:700, color:"#c0392b" }}>
+                        R$ {ins.valor?.toLocaleString("pt-BR", {minimumFractionDigits:2})}
+                      </span>
+                    </div>
+                  ))}
+                  {pgfn.pgfn_total > 5 && (
+                    <div style={{ marginTop:4, fontSize:10, color:MUTED }}>
+                      + {pgfn.pgfn_total - 5} inscrições adicionais — ver PDF completo
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Anexos */}
