@@ -2088,7 +2088,7 @@ BLACK_C = colors.HexColor("#1a1a2e")
 # Aliases para uso na função gerar_pdf_executivo
 NAVY = NAVY_C; GOLD = GOLD_C; RED = RED_C; YEL = YEL_C; GRN = GRN_C
 LIGHT = LIGHT_C; BGRED = BGRED_C; BGYL = BGYL_C; BGGRN = BGGRN_C
-BORD = BORD_C; WHITE = colors.white; BLACK = BLACK_C; MUTED = MUTED_C
+BORD = BORD_C; WHITE = colors.white; BLACK = BLACK_C; MUTED = MUTED_C; DARK = NAVY_C
 
 def ps(name, **kw):
     """Cria ParagraphStyle para PDF."""
@@ -2598,7 +2598,7 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
 
         els.append(Paragraph(
             f"Total: {total_p} inscrição(ões) | Valor: R$ {valor_p:,.2f} | Ref: PGFN SIDA 202603",
-            ps("rp", fontName="Helvetica-Bold", fontSize=9, textColor=RED)))
+            ps("rp", fontName="Helvetica-Bold", fontSize=9, textColor=RED_C)))
         els.append(Spacer(1,6))
 
         inscricoes = pgfn_fonte.get("pgfn_inscricoes", [])
@@ -2615,13 +2615,13 @@ def gerar_pdf_executivo(resultado: dict) -> bytes:
                     ins.get("ajuizado",""),
                     Paragraph(f"R$ {ins.get('valor',0):,.2f}",
                         ps("rv", fontSize=6, fontName="Helvetica-Bold",
-                            textColor=RED if ins.get("ajuizado") == "SIM" else DARK)),
+                            textColor=RED_C if ins.get("ajuizado") == "SIM" else NAVY_C)),
                 ])
 
             tp = Table(rows_p, colWidths=[5*cm, 2.5*cm, 3*cm, 2*cm, 4*cm])
             tp.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,0),RED),
-                ("TEXTCOLOR",(0,0),(-1,0),WHITE),
+                ("BACKGROUND",(0,0),(-1,0),RED_C),
+                ("TEXTCOLOR",(0,0),(-1,0),colors.white),
                 ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
                 ("FONTSIZE",(0,0),(-1,-1),6),
                 ("GRID",(0,0),(-1,-1),0.3,BORD),
