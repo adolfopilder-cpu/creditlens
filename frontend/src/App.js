@@ -71,7 +71,7 @@ export default function App() {
                 letterSpacing: "0.04em",
               }}
             >
-              P.I.L.D.E.R™ CreditLens
+              P.I.L.D.E.R™ Novo app
             </div>
             <div
               style={{
