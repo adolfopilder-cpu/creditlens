@@ -16,7 +16,9 @@ export default function App() {
   }, []);
 
   const ativos = conectores
-    ? Object.values(conectores).filter(c => c?.status === "ativo" || c?.status === "ativo_parcial").length
+    ? Object.values(conectores).filter(
+        (c) => c?.status === "ativo" || c?.status === "ativo_parcial"
+      ).length
     : null;
 
   const BG = "#f5f0e8";
@@ -28,101 +30,288 @@ export default function App() {
   const NAVY = "#1E3A5F";
 
   return (
-    <div style={{ minHeight: "100vh", background: BG, color: TEXT,
-      fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
-
-      {/* Topbar */}
-      <div style={{ borderBottom: `1px solid ${BORDER}`, padding: "0 28px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        height: 54, background: NAVY, position: "sticky", top: 0, zIndex: 100,
-        boxShadow: "0 2px 12px #00000022" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 30, height: 30,
-            background: `linear-gradient(135deg, ${NAVY}, ${GOLD})`,
-            borderRadius: 8, display: "flex", alignItems: "center",
-            justifyContent: "center", fontSize: 15, fontWeight: 900,
-            color: "#fff", fontFamily: "Georgia, serif" }}>P</div>
-          <span style={{ fontWeight: 800, fontSize: 15, letterSpacing: 1, color: "#fff" }}>
-            P.I.L.D.E.R™
-          </span>
-          <span style={{ fontSize: 10, color: "#94a3b8", fontFamily: "monospace" }}>
-            Análise de Crédito v3.0
-          </span>
-        </div>
-
-        <div style={{ display: "flex", gap: 4 }}>
-          {[
-            { id: "analise", label: "🔍 Análise Pontual" },
-            { id: "carteira", label: "📋 Carteira / Lote" },
-            { id: "conectores", label: "⚡ Conectores" },
-          ].map(({ id, label }) => (
-            <button key={id} onClick={() => setTab(id)} style={{
-              background: tab === id ? "#ffffff22" : "transparent",
-              border: tab === id ? "1px solid #ffffff44" : "1px solid transparent",
-              color: tab === id ? "#fff" : "#94a3b8",
-              padding: "6px 16px", borderRadius: 8,
-              fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>
-          {ativos !== null ? `${ativos} conectores ativos` : ""}
-        </div>
-      </div>
-
-      {/* Conteúdo */}
-      <div style={{ padding: "28px 28px", maxWidth: 1300, margin: "0 auto" }}>
-        {tab === "analise" && (
-          <>
-            <PilderHero />
-            <AnalisePage />
-          </>
-        )}
-        {tab === "carteira" && <CarteiraPage />}
-        {tab === "conectores" && (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: BG,
+        color: TEXT,
+        fontFamily:
+          "Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      }}
+    >
+      {/* TOPO */}
+      <header
+        style={{
+          background: NAVY,
+          color: "#fff",
+          padding: "14px 24px",
+          borderBottom: `4px solid ${GOLD}`,
+          position: "sticky",
+          top: 0,
+          zIndex: 50,
+          boxShadow: "0 8px 20px rgba(0,0,0,0.16)",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1400,
+            margin: "0 auto",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+          }}
+        >
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6, color: NAVY }}>
-              Status dos Conectores — 48 Fontes P.I.L.D.E.R™
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 800,
+                letterSpacing: "0.04em",
+              }}
+            >
+              P.I.L.D.E.R™ CreditLens
             </div>
-            <div style={{ fontSize: 12, color: MUTED, marginBottom: 20 }}>
-              Conectores "Pendente" são adaptadores prontos para integração.
-              Ausência de dados nunca equivale a regularidade.
+            <div
+              style={{
+                fontSize: 11,
+                color: "#cbd5e1",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Análise de Crédito B2B — V2.1
             </div>
-            {conectores ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-                {Object.entries(conectores).filter(([k]) => k !== "total_fontes").map(([key, val]) => (
-                  <div key={key} style={{ background: CARD, border: `1px solid ${BORDER}`,
-                    borderRadius: 12, padding: 16 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between",
-                      alignItems: "center", marginBottom: 8 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700,
-                        textTransform: "capitalize", color: NAVY }}>
-                        {key.replace(/_/g, " ")}
-                      </span>
-                      <ConectorBadge status={val?.status} />
+          </div>
+
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {[
+              { id: "analise", label: "🔍 Análise Pontual" },
+              { id: "carteira", label: "📋 Carteira / Lote" },
+              { id: "conectores", label: "⚡ Conectores" },
+              { id: "ice", label: "🕵️ ICE · Investigação" },
+            ].map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                style={{
+                  background: tab === id ? "#ffffff22" : "transparent",
+                  border:
+                    tab === id
+                      ? "1px solid #ffffff44"
+                      : "1px solid transparent",
+                  color: tab === id ? "#fff" : "#94a3b8",
+                  padding: "6px 16px",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div
+            style={{
+              fontSize: 12,
+              color: "#e2e8f0",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <span
+              style={{
+                background: "#ffffff18",
+                border: "1px solid #ffffff33",
+                borderRadius: 999,
+                padding: "5px 10px",
+              }}
+            >
+              {ativos === null ? "Carregando fontes..." : `${ativos}+ conectores ativos`}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* HERO */}
+      <section
+        style={{
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: "22px 24px 0",
+        }}
+      >
+        <PilderHero />
+      </section>
+
+      {/* CONTEÚDO */}
+      <main
+        style={{
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: "20px 24px 40px",
+        }}
+      >
+        {tab === "analise" && (
+          <div
+            style={{
+              background: CARD,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 18,
+              padding: 18,
+              boxShadow: "0 12px 30px rgba(30,58,95,0.08)",
+            }}
+          >
+            <AnalisePage />
+          </div>
+        )}
+
+        {tab === "carteira" && (
+          <div
+            style={{
+              background: CARD,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 18,
+              padding: 18,
+              boxShadow: "0 12px 30px rgba(30,58,95,0.08)",
+            }}
+          >
+            <CarteiraPage />
+          </div>
+        )}
+
+        {tab === "ice" && (
+          <div
+            style={{
+              background: CARD,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 18,
+              padding: 18,
+              boxShadow: "0 12px 30px rgba(30,58,95,0.08)",
+            }}
+          >
+            <ModuloICE />
+          </div>
+        )}
+
+        {tab === "conectores" && (
+          <div
+            style={{
+              background: CARD,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 18,
+              padding: 22,
+              boxShadow: "0 12px 30px rgba(30,58,95,0.08)",
+            }}
+          >
+            <div style={{ marginBottom: 18 }}>
+              <h2
+                style={{
+                  margin: 0,
+                  color: NAVY,
+                  fontSize: 22,
+                  fontWeight: 800,
+                }}
+              >
+                Status dos Conectores
+              </h2>
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  color: MUTED,
+                  fontSize: 14,
+                }}
+              >
+                Visão executiva das fontes públicas e integrações disponíveis no
+                CreditLens.
+              </p>
+            </div>
+
+            {!conectores && (
+              <div
+                style={{
+                  padding: 18,
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 12,
+                  color: MUTED,
+                }}
+              >
+                Carregando status dos conectores...
+              </div>
+            )}
+
+            {conectores && (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                {Object.entries(conectores).map(([nome, info]) => (
+                  <div
+                    key={nome}
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 14,
+                      padding: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 800,
+                        color: NAVY,
+                        marginBottom: 8,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {nome}
                     </div>
-                    <div style={{ fontSize: 10, color: MUTED,
-                      fontFamily: "monospace", background: BG,
-                      borderRadius: 6, padding: "4px 8px" }}>
-                      tipo: {val?.tipo}
-                    </div>
+
+                    <ConectorBadge status={info?.status} />
+
+                    {info?.mensagem && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          fontSize: 12,
+                          color: MUTED,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {info.mensagem}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-            ) : (
-              <div style={{ color: MUTED, fontSize: 13 }}>Backend offline.</div>
             )}
-            <div style={{ marginTop: 20, padding: 16, background: NAVY,
-              borderRadius: 12, textAlign: "center",
-              fontSize: 12, color: GOLD, fontWeight: 700, letterSpacing: 1 }}>
-              P.I.L.D.E.R™ – Método Estruturado de Análise e Gestão de Crédito — 48 Fontes
-            </div>
           </div>
         )}
-      </div>
+      </main>
+
+      {/* RODAPÉ */}
+      <footer
+        style={{
+          maxWidth: 1400,
+          margin: "0 auto",
+          padding: "0 24px 28px",
+          color: MUTED,
+          fontSize: 12,
+          textAlign: "center",
+        }}
+      >
+        P.I.L.D.E.R™ — Método estruturado de análise e gestão de crédito ·
+        Adolfo Pildervasser · Adolfo Financeiro
+      </footer>
     </div>
   );
 }
