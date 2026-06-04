@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import AnalisePage from "./pages/AnalisePage";
 import CarteiraPage from "./pages/CarteiraPage";
+import ModuloICE from "./pages/ModuloICE";
 import PilderHero from "./components/PilderHero";
 import { statusConectores } from "./hooks/useApi";
 import { ConectorBadge } from "./components/ui";
