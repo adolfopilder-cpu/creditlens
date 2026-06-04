@@ -8,7 +8,7 @@ import { statusConectores } from "./hooks/useApi";
 import { ConectorBadge } from "./components/ui";
 
 export default function App() {
-  const [tab, setTab] = useState("analise");
+  const [tab, setTab] = useState("ice");
   const [conectores, setConectores] = useState(null);
 
   useEffect(() => {
