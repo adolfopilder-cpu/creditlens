@@ -1,6 +1,5 @@
-
 import { useState, useRef } from "react";
-
+export default function ModuloICE() {
 
 // ─── Utilitários ────────────────────────────────────────────────────────────
 
