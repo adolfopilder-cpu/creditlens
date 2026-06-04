@@ -184,19 +184,19 @@ export default function App() {
           </div>
         )}
 
-        {tab === "ice" && (
-          <div
-            style={{
-              background: CARD,
-              border: `1px solid ${BORDER}`,
-              borderRadius: 18,
-              padding: 18,
-              boxShadow: "0 12px 30px rgba(30,58,95,0.08)",
-            }}
-          >
-            <ModuloICE />
-          </div>
-        )}
+{tab === "ice" && (
+  <div
+    style={{
+      background: CARD,
+      border: `1px solid ${BORDER}`,
+      borderRadius: 18,
+      padding: 18,
+      boxShadow: "0 12px 30px rgba(30,58,95,0.08)",
+    }}
+  >
+    <ModuloICE />
+  </div>
+)}        
 
         {tab === "conectores" && (
           <div
